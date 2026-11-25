@@ -1,0 +1,22 @@
+[
+  {
+    "path": ".agents/rules/team-governance.md",
+    "description": "Reglas de gobernanza general y límites de responsabilidad del equipo de 5 agentes."
+  },
+  {
+    "path": ".agents/rules/frontend.md",
+    "description": "Reglas para el desarrollo frontend y componentes de interfaz."
+  },
+  {
+    "path": ".agents/rules/backend.md",
+    "description": "Reglas para la lógica de negocio, integración con Supabase, pagos y tiqueteras."
+  },
+  {
+    "path": ".agents/rules/database-mobile.md",
+    "description": "Reglas para esquemas PostgreSQL, RLS, RPC anti-colisión y Capacitor Android."
+  },
+  {
+    "path": ".agents/rules/qa.md",
+    "description": "Reglas de control de calidad, auditoría y reporte de incidencias."
+  }
+]

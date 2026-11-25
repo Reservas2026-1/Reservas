@@ -1,0 +1,8 @@
+{
+	"appId": "com.reservas.indoorcycling",
+	"appName": "Reservas Studio",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https"
+	}
+}

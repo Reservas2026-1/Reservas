@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Reservas Studio</string>
+    <string name="title_activity_main">Reservas Studio</string>
+    <string name="package_name">com.reservas.indoorcycling</string>
+    <string name="custom_url_scheme">com.reservas.indoorcycling</string>
+</resources>
