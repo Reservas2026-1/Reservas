@@ -312,6 +312,7 @@ export interface Database {
           hora_fin: string
           capacidad: number
           estado: EstadoClase
+          es_clase_especial?: boolean
           created_at: string
           updated_at: string | null
         }
@@ -326,6 +327,7 @@ export interface Database {
           hora_fin: string
           capacidad?: number
           estado?: EstadoClase
+          es_clase_especial?: boolean
           created_at?: string
           updated_at?: string | null
         }
@@ -340,6 +342,7 @@ export interface Database {
           hora_fin?: string
           capacidad?: number
           estado?: EstadoClase
+          es_clase_especial?: boolean
           created_at?: string
           updated_at?: string | null
         }
@@ -600,6 +603,92 @@ export interface Database {
             columns: ['empresa_id']
             isOneToOne: false
             referencedRelation: 'empresas'
+            referencedColumns: ['id']
+          }
+        ]
+      }
+      horarios_base: {
+        Row: {
+          id: string
+          empresa_id: string
+          dia_semana: number
+          hora_inicio: string
+          hora_fin: string
+          activo: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          empresa_id: string
+          dia_semana: number
+          hora_inicio: string
+          hora_fin: string
+          activo?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          empresa_id?: string
+          dia_semana?: number
+          hora_inicio?: string
+          hora_fin?: string
+          activo?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'horarios_base_empresa_id_fkey'
+            columns: ['empresa_id']
+            isOneToOne: false
+            referencedRelation: 'empresas'
+            referencedColumns: ['id']
+          }
+        ]
+      }
+      planificaciones: {
+        Row: {
+          id: string
+          empresa_id: string
+          horario_base_id: string
+          fecha: string
+          es_clase_especial: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          empresa_id: string
+          horario_base_id: string
+          fecha: string
+          es_clase_especial?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          empresa_id?: string
+          horario_base_id?: string
+          fecha?: string
+          es_clase_especial?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'planificaciones_empresa_id_fkey'
+            columns: ['empresa_id']
+            isOneToOne: false
+            referencedRelation: 'empresas'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'planificaciones_horario_base_id_fkey'
+            columns: ['horario_base_id']
+            isOneToOne: false
+            referencedRelation: 'horarios_base'
             referencedColumns: ['id']
           }
         ]

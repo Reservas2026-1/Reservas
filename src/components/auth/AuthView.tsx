@@ -121,7 +121,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, onSkipToDemo 
         <div className="space-y-6 lg:pr-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-muted border text-xs font-semibold">
             <span className={`w-2.5 h-2.5 rounded-full ${currentPalette.bgClass} animate-pulse`} />
-            <span>Sistema Multi-Tenant Indoor Cycling</span>
+            <span>Sistema multiinquilino para ciclismo en interiores</span>
           </div>
 
           <div className="space-y-3">
@@ -136,7 +136,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, onSkipToDemo 
               </h1>
             </div>
 
-            <p className="text-base text-muted-foreground leading-relaxed">
+            <p className="text-base text-gray-700 leading-relaxed">
               Reserva tu bicicleta en tiempo real para las mejores sesiones de ritmo, potencia y
               resistencia. Gestiona tus créditos, paquetes y pases de acceso QR en un solo lugar.
             </p>
@@ -147,9 +147,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, onSkipToDemo 
             <div className="p-3.5 rounded-xl border bg-card/60 backdrop-blur-sm space-y-1">
               <div className="flex items-center gap-2 text-sm font-bold">
                 <Bike className={`w-4 h-4 ${currentPalette.textClass}`} />
-                <span>15 Bicicletas Pro</span>
+                <span>Bicicletas Pro</span>
               </div>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-gray-700 ">
                 Selección de puesto en tarima con vista 3x5 interactiva.
               </p>
             </div>
@@ -159,39 +159,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, onSkipToDemo 
                 <ShieldCheck className={`w-4 h-4 ${currentPalette.textClass}`} />
                 <span>Pase QR Inteligente</span>
               </div>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-gray-700 ">
                 Check-in instantáneo en recepción sin esperas ni fricción.
               </p>
-            </div>
-          </div>
-
-          {/* Acceso Rápido Demo para Evaluador */}
-          <div className="p-4 rounded-xl border border-dashed border-muted-foreground/30 bg-muted/30 space-y-2">
-            <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              <span>Acceso Rápido Demo (Sin necesidad de credenciales)</span>
-            </div>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => handleQuickDemo('cliente')}
-                className="text-xs gap-1.5 hover:border-primary"
-              >
-                <User className="w-3.5 h-3.5" />
-                Ingresar como Cliente Demo
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => handleQuickDemo('admin')}
-                className="text-xs gap-1.5"
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                Ingresar como Administrador Demo
-              </Button>
             </div>
           </div>
         </div>
@@ -207,11 +177,10 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, onSkipToDemo 
                     setMode('signin')
                     setErrorMessage(null)
                   }}
-                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                    mode === 'signin'
-                      ? 'bg-background shadow-sm text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${mode === 'signin'
+                    ? 'bg-background shadow-sm text-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                    }`}
                 >
                   Iniciar Sesión
                 </button>
@@ -221,11 +190,10 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, onSkipToDemo 
                     setMode('signup')
                     setErrorMessage(null)
                   }}
-                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                    mode === 'signup'
-                      ? 'bg-background shadow-sm text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${mode === 'signup'
+                    ? 'bg-background shadow-sm text-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                    }`}
                 >
                   Registrarse
                 </button>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -12,237 +12,171 @@ import {
   RefreshCw,
   FileText,
   TrendingUp,
+  Trash2,
+  AlertCircle,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { toast } from '@/components/ui/use-toast'
 import { useBranding } from '@/context/BrandingContext'
 import { adminService, type CierreCajaResumen } from '@/services/adminService'
-import type { Tables } from '@/types/database'
 
-// Fallback de demostración con montos en COP para Indoor Cycling
-const fallbackCierre: CierreCajaResumen = {
-  fecha: new Date().toISOString().split('T')[0],
-  totalIngresos: 1350000,
-  totalEgresos: 65000,
-  balanceNeto: 1285000,
-  totalMovimientos: 5,
-  desglosePorMetodo: {
-    efectivo: {
-      metodo: 'efectivo',
-      ingresos: 320000,
-      egresos: 65000,
-      neto: 255000,
-      cantidadTransacciones: 3,
-    },
-    nequi: {
-      metodo: 'nequi',
-      ingresos: 580000,
-      egresos: 0,
-      neto: 580000,
-      cantidadTransacciones: 2,
-    },
-    bancolombia: {
-      metodo: 'bancolombia',
-      ingresos: 450000,
-      egresos: 0,
-      neto: 450000,
-      cantidadTransacciones: 1,
-    },
-    wompi: {
-      metodo: 'wompi',
-      ingresos: 0,
-      egresos: 0,
-      neto: 0,
-      cantidadTransacciones: 0,
-    },
-  },
-  movimientos: [
-    {
-      id: 'mov-01',
-      empresa_id: 'emp-velo-001',
-      usuario_id: null,
-      pago_id: null,
-      tipo: 'ingreso',
-      concepto: 'Pago Single Ride #RES-884 (Efectivo)',
-      monto: 35000,
-      metodo: 'efectivo',
-      reserva_id: null,
-      responsable: 'Carlos Recepción',
-      fecha: `${new Date().toISOString().split('T')[0]}T07:15:00`,
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'mov-02',
-      empresa_id: 'emp-velo-001',
-      usuario_id: null,
-      pago_id: null,
-      tipo: 'ingreso',
-      concepto: 'Pago Pack 10 Clases Pro (Nequi #NEQUI-8849)',
-      monto: 290000,
-      metodo: 'nequi',
-      reserva_id: null,
-      responsable: 'Carlos Recepción',
-      fecha: `${new Date().toISOString().split('T')[0]}T08:30:00`,
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'mov-03',
-      empresa_id: 'emp-velo-001',
-      usuario_id: null,
-      pago_id: null,
-      tipo: 'egreso',
-      concepto: 'Compra de toallas limpias e hidratación para ciclistas',
-      monto: 65000,
-      metodo: 'efectivo',
-      reserva_id: null,
-      responsable: 'Carlos Recepción',
-      fecha: `${new Date().toISOString().split('T')[0]}T10:45:00`,
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'mov-04',
-      empresa_id: 'emp-velo-001',
-      usuario_id: null,
-      pago_id: null,
-      tipo: 'ingreso',
-      concepto: 'Pago Pase Mensual 20 Clases (Bancolombia #BC-9948)',
-      monto: 450000,
-      metodo: 'bancolombia',
-      reserva_id: null,
-      responsable: 'Carlos Recepción',
-      fecha: `${new Date().toISOString().split('T')[0]}T11:20:00`,
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 'mov-05',
-      empresa_id: 'emp-velo-001',
-      usuario_id: null,
-      pago_id: null,
-      tipo: 'ingreso',
-      concepto: 'Pago Pack 10 Clases Pro (Nequi #NEQUI-1123)',
-      monto: 290000,
-      metodo: 'nequi',
-      reserva_id: null,
-      responsable: 'Carlos Recepción',
-      fecha: `${new Date().toISOString().split('T')[0]}T14:10:00`,
-      created_at: new Date().toISOString(),
-    },
-  ],
+interface CashRegisterProps {
+  responsableNombre?: string
+  usuarioId?: string | null
 }
 
-export const CashRegister: React.FC = () => {
+const createEmptyCierre = (fecha: string): CierreCajaResumen => ({
+  fecha,
+  totalIngresos: 0,
+  totalEgresos: 0,
+  balanceNeto: 0,
+  totalMovimientos: 0,
+  desglosePorMetodo: {},
+  movimientos: [],
+})
+
+export const CashRegister: React.FC<CashRegisterProps> = ({
+  responsableNombre = 'Administrador General',
+  usuarioId = null,
+}) => {
   const { currentPalette, empresaId, studioName } = useBranding()
 
   const [fechaConsulta, setFechaConsulta] = useState<string>(
     new Date().toISOString().split('T')[0]
   )
-  const [resumenCaja, setResumenCaja] = useState<CierreCajaResumen>(fallbackCierre)
+  const [resumenCaja, setResumenCaja] = useState<CierreCajaResumen>(() =>
+    createEmptyCierre(new Date().toISOString().split('T')[0])
+  )
   const [loading, setLoading] = useState<boolean>(true)
   const [refreshing, setRefreshing] = useState<boolean>(false)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // Formulario de nuevo movimiento manual
+  // Formulario de nuevo movimiento
   const [concepto, setConcepto] = useState('')
   const [monto, setMonto] = useState('')
   const [tipo, setTipo] = useState<'ingreso' | 'egreso'>('ingreso')
   const [metodo, setMetodo] = useState<'efectivo' | 'nequi' | 'bancolombia' | 'wompi'>('efectivo')
+  const [submitting, setSubmitting] = useState<boolean>(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  const cargarCierre = async (fecha?: string) => {
-    try {
-      const res = await adminService.getCierreCaja(empresaId, fecha || fechaConsulta)
-      if (res.data) {
-        setResumenCaja(res.data)
-      } else {
-        setResumenCaja(fallbackCierre)
+  const cargarCierre = useCallback(
+    async (fecha?: string) => {
+      const targetFecha = fecha || fechaConsulta
+      setErrorMsg(null)
+      try {
+        const res = await adminService.getCierreCaja(empresaId, targetFecha)
+        if (res.error || !res.data) {
+          const msg = res.error || 'No se pudo consultar el cierre de caja'
+          setErrorMsg(msg)
+          setResumenCaja(createEmptyCierre(targetFecha))
+          toast({ variant: 'destructive', title: 'Error en caja', description: msg })
+        } else {
+          setResumenCaja(res.data)
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Error al cargar cierre de caja'
+        setErrorMsg(msg)
+        setResumenCaja(createEmptyCierre(targetFecha))
+        toast({ variant: 'destructive', title: 'Error en caja', description: msg })
+      } finally {
+        setLoading(false)
+        setRefreshing(false)
       }
-    } catch (err) {
-      console.warn('Error al cargar cierre de caja, usando fallback:', err)
-      setResumenCaja(fallbackCierre)
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
-    }
-  }
+    },
+    [empresaId, fechaConsulta]
+  )
 
   useEffect(() => {
+    setLoading(true)
     cargarCierre(fechaConsulta)
-  }, [empresaId, fechaConsulta])
+  }, [cargarCierre, fechaConsulta])
 
   const handleManualRefresh = () => {
     setRefreshing(true)
     cargarCierre(fechaConsulta)
   }
 
-  // Formato COP
-  const formatCOP = (valor: number) => {
-    return new Intl.NumberFormat('es-CO', {
+  const formatCOP = (valor: number) =>
+    new Intl.NumberFormat('es-CO', {
       style: 'currency',
       currency: 'COP',
       maximumFractionDigits: 0,
     }).format(valor)
-  }
 
-  // Agregar movimiento local / sesión
-  const handleAgregarMovimiento = (e: React.FormEvent) => {
+  const handleAgregarMovimiento = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!concepto.trim() || !monto || parseFloat(monto) <= 0) return
-
-    const valorMonto = parseFloat(monto)
-    const nuevoMovimiento: Tables<'movimientos_caja'> = {
-      id: `mov-${Date.now()}`,
-      empresa_id: empresaId,
-      usuario_id: null,
-      pago_id: null,
-      tipo,
-      concepto: concepto.trim(),
-      monto: valorMonto,
-      metodo,
-      reserva_id: null,
-      responsable: 'Operador Recepción',
-      fecha: new Date().toISOString(),
-      created_at: new Date().toISOString(),
+    const valorMonto = Number.parseFloat(monto)
+    if (!concepto.trim() || !Number.isFinite(valorMonto) || valorMonto <= 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Datos incompletos',
+        description: 'Ingresa un concepto válido y un monto mayor a 0.',
+      })
+      return
     }
 
-    setResumenCaja((prev) => {
-      const nuevoIngresos = tipo === 'ingreso' ? prev.totalIngresos + valorMonto : prev.totalIngresos
-      const nuevoEgresos = tipo === 'egreso' ? prev.totalEgresos + valorMonto : prev.totalEgresos
+    setSubmitting(true)
+    try {
+      const fechaMovimiento =
+        fechaConsulta === new Date().toISOString().split('T')[0]
+          ? new Date().toISOString()
+          : `${fechaConsulta}T12:00:00.000Z`
 
-      const desgloseActual = { ...prev.desglosePorMetodo }
-      if (!desgloseActual[metodo]) {
-        desgloseActual[metodo] = {
-          metodo,
-          ingresos: 0,
-          egresos: 0,
-          neto: 0,
-          cantidadTransacciones: 0,
-        }
-      }
-      desgloseActual[metodo].cantidadTransacciones += 1
-      if (tipo === 'ingreso') {
-        desgloseActual[metodo].ingresos += valorMonto
-        desgloseActual[metodo].neto += valorMonto
-      } else {
-        desgloseActual[metodo].egresos += valorMonto
-        desgloseActual[metodo].neto -= valorMonto
+      const res = await adminService.registrarMovimientoCaja({
+        empresaId,
+        tipo,
+        concepto: concepto.trim(),
+        monto: valorMonto,
+        metodo,
+        responsable: responsableNombre,
+        usuarioId,
+        fecha: fechaMovimiento,
+      })
+
+      if (res.error || !res.data) {
+        toast({
+          variant: 'destructive',
+          title: 'Error registrando movimiento',
+          description: res.error || 'No se pudo guardar en base de datos',
+        })
+        return
       }
 
-      return {
-        ...prev,
-        totalIngresos: nuevoIngresos,
-        totalEgresos: nuevoEgresos,
-        balanceNeto: nuevoIngresos - nuevoEgresos,
-        totalMovimientos: prev.totalMovimientos + 1,
-        desglosePorMetodo: desgloseActual,
-        movimientos: [nuevoMovimiento, ...prev.movimientos],
-      }
-    })
-
-    setConcepto('')
-    setMonto('')
+      toast({
+        variant: 'success',
+        title: tipo === 'ingreso' ? 'Ingreso registrado' : 'Egreso registrado',
+        description: `${res.data.concepto} (${formatCOP(res.data.monto)})`,
+      })
+      setConcepto('')
+      setMonto('')
+      cargarCierre(fechaConsulta)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
-  // Totales segregados
+  const handleEliminarMovimiento = async (movimientoId: string) => {
+    setDeletingId(movimientoId)
+    try {
+      const res = await adminService.eliminarMovimientoCaja(movimientoId, empresaId)
+      if (!res.success) {
+        toast({
+          variant: 'destructive',
+          title: 'No se pudo eliminar',
+          description: res.error || 'Error al eliminar el movimiento',
+        })
+        return
+      }
+      toast({ variant: 'success', title: 'Movimiento eliminado' })
+      cargarCierre(fechaConsulta)
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const totalEfectivo =
     (resumenCaja.desglosePorMetodo?.['efectivo']?.ingresos || 0) -
     (resumenCaja.desglosePorMetodo?.['efectivo']?.egresos || 0)
@@ -261,7 +195,7 @@ export const CashRegister: React.FC = () => {
       {/* Encabezado y Selector de Fecha */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-black tracking-tight">Arqueo y Cierre de Caja</h1>
             <Badge variant="outline" className="text-xs font-mono">
               {studioName}
@@ -284,6 +218,7 @@ export const CashRegister: React.FC = () => {
           </div>
 
           <Button
+            type="button"
             variant="outline"
             size="icon"
             onClick={handleManualRefresh}
@@ -296,9 +231,15 @@ export const CashRegister: React.FC = () => {
         </div>
       </div>
 
-      {/* Tarjetas de Resumen Financiero Segregado (4 Tarjetas) */}
+      {errorMsg && (
+        <div className="p-3 rounded-xl border border-destructive/30 bg-destructive/10 text-destructive text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {/* Tarjetas de Resumen Financiero Segregado */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Tarjeta 1: Efectivo Físico */}
         <Card className="relative overflow-hidden border-border/80 shadow-sm">
           <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -318,14 +259,13 @@ export const CashRegister: React.FC = () => {
                   {formatCOP(totalEfectivo)}
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  Dinero físico disponible en recepción
+                  Dinero físico neto del día
                 </p>
               </>
             )}
           </CardContent>
         </Card>
 
-        {/* Tarjeta 2: Nequi / Bancolombia */}
         <Card className="relative overflow-hidden border-border/80 shadow-sm">
           <div className="absolute top-0 left-0 right-0 h-1 bg-purple-500" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -352,7 +292,6 @@ export const CashRegister: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* Tarjeta 3: Wompi / Tarjeta */}
         <Card className="relative overflow-hidden border-border/80 shadow-sm">
           <div className="absolute top-0 left-0 right-0 h-1 bg-blue-500" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -372,14 +311,13 @@ export const CashRegister: React.FC = () => {
                   {formatCOP(totalWompiTarjeta)}
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  Pasarela en línea con dispersión automática
+                  Pasarela en línea
                 </p>
               </>
             )}
           </CardContent>
         </Card>
 
-        {/* Tarjeta 4: Balance Neto Diario */}
         <Card className="relative overflow-hidden border-border/80 shadow-sm">
           <div className={`absolute top-0 left-0 right-0 h-1 ${currentPalette.bgClass}`} />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -414,9 +352,8 @@ export const CashRegister: React.FC = () => {
         </Card>
       </div>
 
-      {/* Contenedor Principal: Formulario Nuevo Movimiento + Tabla de Movimientos del Día */}
+      {/* Formulario Nuevo Movimiento + Tabla de Movimientos */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Formulario de Registro de Movimiento Manual */}
         <Card className="border-border/80 shadow-sm">
           <CardHeader className="p-5 pb-3 border-b">
             <CardTitle className="text-base flex items-center gap-2">
@@ -430,14 +367,15 @@ export const CashRegister: React.FC = () => {
 
           <form onSubmit={handleAgregarMovimiento}>
             <CardContent className="p-5 space-y-4 text-xs">
-              {/* Selector de Tipo (Ingreso / Egreso) */}
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   type="button"
                   variant={tipo === 'ingreso' ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => setTipo('ingreso')}
-                  className={tipo === 'ingreso' ? 'bg-emerald-600 hover:bg-emerald-700 text-white font-bold' : ''}
+                  className={
+                    tipo === 'ingreso' ? 'bg-emerald-600 hover:bg-emerald-700 text-white font-bold' : ''
+                  }
                 >
                   <ArrowUpRight className="mr-1.5 h-4 w-4" /> Ingreso
                 </Button>
@@ -446,13 +384,14 @@ export const CashRegister: React.FC = () => {
                   variant={tipo === 'egreso' ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => setTipo('egreso')}
-                  className={tipo === 'egreso' ? 'bg-rose-600 hover:bg-rose-700 text-white font-bold' : ''}
+                  className={
+                    tipo === 'egreso' ? 'bg-rose-600 hover:bg-rose-700 text-white font-bold' : ''
+                  }
                 >
                   <ArrowDownRight className="mr-1.5 h-4 w-4" /> Egreso
                 </Button>
               </div>
 
-              {/* Concepto */}
               <div className="space-y-1">
                 <label className="font-bold text-foreground">Concepto / Motivo</label>
                 <Input
@@ -464,7 +403,6 @@ export const CashRegister: React.FC = () => {
                 />
               </div>
 
-              {/* Monto en COP */}
               <div className="space-y-1">
                 <label className="font-bold text-foreground">Monto en COP ($)</label>
                 <Input
@@ -479,11 +417,10 @@ export const CashRegister: React.FC = () => {
                 />
               </div>
 
-              {/* Método de Pago */}
               <div className="space-y-1">
                 <label className="font-bold text-foreground">Canal de Pago</label>
                 <select
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs"
                   value={metodo}
                   onChange={(e) =>
                     setMetodo(e.target.value as 'efectivo' | 'nequi' | 'bancolombia' | 'wompi')
@@ -498,15 +435,22 @@ export const CashRegister: React.FC = () => {
 
               <Button
                 type="submit"
+                disabled={submitting}
                 className={`w-full font-bold shadow-sm ${currentPalette.bgClass} text-white mt-2`}
               >
-                Guardar Asiento Contable
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+                    Guardando...
+                  </>
+                ) : (
+                  'Guardar Asiento Contable'
+                )}
               </Button>
             </CardContent>
           </form>
         </Card>
 
-        {/* Tabla de Movimientos del Día */}
         <Card className="lg:col-span-2 border-border/80 shadow-sm">
           <CardHeader className="p-5 pb-3 border-b flex flex-row items-center justify-between">
             <div>
@@ -524,7 +468,11 @@ export const CashRegister: React.FC = () => {
           </CardHeader>
 
           <CardContent className="p-0">
-            {resumenCaja.movimientos.length === 0 ? (
+            {loading ? (
+              <div className="h-44 flex items-center justify-center">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : resumenCaja.movimientos.length === 0 ? (
               <div className="p-8 text-center text-xs text-muted-foreground">
                 No hay movimientos contables registrados en esta fecha.
               </div>
@@ -539,7 +487,7 @@ export const CashRegister: React.FC = () => {
                       key={m.id}
                       className="p-3.5 flex items-center justify-between gap-4 hover:bg-muted/10 transition-colors"
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         <div
                           className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
                             isIngreso
@@ -554,9 +502,9 @@ export const CashRegister: React.FC = () => {
                           )}
                         </div>
 
-                        <div className="space-y-0.5">
-                          <div className="font-bold text-foreground">{m.concepto}</div>
-                          <div className="text-[11px] text-muted-foreground flex items-center gap-2">
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="font-bold text-foreground truncate">{m.concepto}</div>
+                          <div className="text-[11px] text-muted-foreground flex items-center gap-2 flex-wrap">
                             <span className="font-mono">{hora} hrs</span>
                             <span>•</span>
                             <span className="capitalize font-medium">{m.metodo}</span>
@@ -566,7 +514,7 @@ export const CashRegister: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="text-right shrink-0">
+                      <div className="flex items-center gap-3 shrink-0">
                         <div
                           className={`font-black text-sm ${
                             isIngreso ? 'text-emerald-600' : 'text-rose-600'
@@ -574,6 +522,21 @@ export const CashRegister: React.FC = () => {
                         >
                           {isIngreso ? '+' : '-'} {formatCOP(m.monto)}
                         </div>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          disabled={deletingId === m.id}
+                          onClick={() => handleEliminarMovimiento(m.id)}
+                          title="Eliminar movimiento"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        >
+                          {deletingId === m.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                        </Button>
                       </div>
                     </div>
                   )

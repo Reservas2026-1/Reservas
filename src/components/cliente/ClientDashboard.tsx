@@ -13,16 +13,19 @@ import {
   XCircle,
   Flame,
   Award,
+  Trophy,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { QRCode } from '@/components/ui/qr-code'
 import { useBranding } from '@/context/BrandingContext'
+import { toast } from '@/components/ui/use-toast'
 import { authService } from '@/services/authService'
 import { reservasService, type ReservaDetallada } from '@/services/reservasService'
 import { tiqueterasService, type TiqueteraConPlan } from '@/services/tiqueterasService'
 import { offlineService, type ReservaPaseOffline } from '@/services/offlineService'
+import { obtenerMetricasUsuario } from '@/services/metricasService'
 import type { Tables } from '@/types/database'
 
 interface ClientDashboardProps {
@@ -32,121 +35,35 @@ interface ClientDashboardProps {
   onSignOut: () => void
 }
 
-// Fallback de reservas de muestra para visualización fluida si aún no hay reservas en DB
-const fallbackReservas: ReservaDetallada[] = [
-  {
-    id: 'res-demo-proxima',
-    empresa_id: 'emp-velo-001',
-    clase_id: 'clase-demo-01',
-    bicicleta_id: 'bici-04',
-    cliente_id: 'usr-demo-01',
-    tiquetera_id: 'tiq-demo-01',
-    plan_id: null,
-    cliente_nombre: 'Alejandro Vargas',
-    cliente_documento: '1029384756',
-    cliente_telefono: '3001234567',
-    cliente_email: 'alejandro@ejemplo.com',
-    fecha_reserva: new Date().toISOString(),
-    fecha_inicio: new Date(Date.now() + 2 * 3600 * 1000).toISOString(),
-    fecha_fin: new Date(Date.now() + 2.8 * 3600 * 1000).toISOString(),
-    estado: 'confirmada',
-    total: 35,
-    notas: 'Puesto Fila 1 preferencial',
-    codigo_qr: 'CYCLING-PASS-BICI04-8849',
-    asistencia_confirmada: false,
-    created_at: new Date().toISOString(),
-    updated_at: null,
-    clase: {
-      id: 'clase-demo-01',
-      empresa_id: 'emp-velo-001',
-      instructor_id: 'inst-01',
-      titulo: 'Power Cycling & Beats',
-      descripcion: 'Sesión de alta intensidad con intervalos de ritmo.',
-      fecha: new Date().toISOString().split('T')[0],
-      hora_inicio: '18:30:00',
-      hora_fin: '19:20:00',
-      capacidad: 15,
-      estado: 'programada',
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-    bicicleta: {
-      id: 'bici-04',
-      empresa_id: 'emp-velo-001',
-      numero: 4,
-      codigo: 'IC-04',
-      modelo: 'Stages SC3 Smart Bike',
-      fila: 1,
-      columna: 4,
-      tipo: 'indoor',
-      estado: 'reservada',
-      latitud: null,
-      longitud: null,
-      bateria_porcentaje: 92,
-      tarifa_hora: null,
-      activo: true,
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-    tiquetera: null,
-  },
-  {
-    id: 'res-demo-pasada',
-    empresa_id: 'emp-velo-001',
-    clase_id: 'clase-demo-02',
-    bicicleta_id: 'bici-08',
-    cliente_id: 'usr-demo-01',
-    tiquetera_id: 'tiq-demo-01',
-    plan_id: null,
-    cliente_nombre: 'Alejandro Vargas',
-    cliente_documento: '1029384756',
-    cliente_telefono: '3001234567',
-    cliente_email: 'alejandro@ejemplo.com',
-    fecha_reserva: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
-    fecha_inicio: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
-    fecha_fin: new Date(Date.now() - 47.2 * 3600 * 1000).toISOString(),
-    estado: 'finalizada',
-    total: 35,
-    notas: 'Completada',
-    codigo_qr: 'CYCLING-PASS-BICI08-3312',
-    asistencia_confirmada: true,
-    created_at: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
-    updated_at: null,
-    clase: {
-      id: 'clase-demo-02',
-      empresa_id: 'emp-velo-001',
-      instructor_id: 'inst-02',
-      titulo: 'Rhythm & Glow Ride',
-      descripcion: 'Rodada al ritmo de la música con luces neón.',
-      fecha: new Date(Date.now() - 48 * 3600 * 1000).toISOString().split('T')[0],
-      hora_inicio: '07:00:00',
-      hora_fin: '07:50:00',
-      capacidad: 15,
-      estado: 'completada',
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-    bicicleta: {
-      id: 'bici-08',
-      empresa_id: 'emp-velo-001',
-      numero: 8,
-      codigo: 'IC-08',
-      modelo: 'Stages SC3 Smart Bike',
-      fila: 2,
-      columna: 3,
-      tipo: 'indoor',
-      estado: 'disponible',
-      latitud: null,
-      longitud: null,
-      bateria_porcentaje: 84,
-      tarifa_hora: null,
-      activo: true,
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-    tiquetera: null,
-  },
-]
+interface MetricasGamificacionUI {
+  puntos_acumulados: number
+  ranking_clase: number
+  potencia_promedio_watts?: number
+}
+
+function extraerMetricasGamificacion(raw: unknown): MetricasGamificacionUI | null {
+  if (!raw || typeof raw !== 'object') return null
+
+  const candidate =
+    'data' in raw && raw.data && typeof raw.data === 'object'
+      ? raw.data
+      : raw
+
+  const item = Array.isArray(candidate) ? candidate[0] : candidate
+  if (!item || typeof item !== 'object') return null
+
+  const record = item as Record<string, unknown>
+  if (typeof record.puntos_acumulados !== 'number' && typeof record.ranking_clase !== 'number') {
+    return null
+  }
+
+  return {
+    puntos_acumulados: typeof record.puntos_acumulados === 'number' ? record.puntos_acumulados : 0,
+    ranking_clase: typeof record.ranking_clase === 'number' ? record.ranking_clase : 0,
+    potencia_promedio_watts:
+      typeof record.potencia_promedio_watts === 'number' ? record.potencia_promedio_watts : undefined,
+  }
+}
 
 export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   currentUser,
@@ -154,12 +71,14 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   onNavigateToPlanes,
   onSignOut,
 }) => {
-  const { currentPalette, empresaId } = useBranding()
+  const { currentPalette, empresaId, studioName } = useBranding()
 
   // Estados de datos
-  const [creditosDisponibles, setCreditosDisponibles] = useState<number>(5)
+  const [creditosDisponibles, setCreditosDisponibles] = useState<number>(0)
   const [tiqueteraActiva, setTiqueteraActiva] = useState<TiqueteraConPlan | null>(null)
   const [reservas, setReservas] = useState<ReservaDetallada[]>([])
+  const [metricasGamificacion, setMetricasGamificacion] = useState<MetricasGamificacionUI | null>(null)
+  const [loadingMetricas, setLoadingMetricas] = useState<boolean>(true)
   const [loading, setLoading] = useState(true)
   const [selectedQrPass, setSelectedQrPass] = useState<ReservaDetallada | null>(null)
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
@@ -172,16 +91,16 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   const [reservaParaCancelar, setReservaParaCancelar] = useState<ReservaDetallada | null>(null)
   const [cancellingLoading, setCancellingLoading] = useState<boolean>(false)
 
-  const clienteId = currentUser?.id || 'usr-demo-01'
+  const clienteId = currentUser?.id || ''
 
-  // Cargar datos consumiendo tiqueterasService y reservasService
+  // Cargar datos consumiendo tiqueterasService, reservasService y metricasService
   useEffect(() => {
     let isMounted = true
 
     const cargarDatos = async () => {
       setLoading(true)
+      setLoadingMetricas(true)
       try {
-        // Cargar pase offline si existe previamente en el almacenamiento local del dispositivo
         try {
           const cachedPass = await offlineService.getPaseOffline()
           if (isMounted && cachedPass) {
@@ -191,43 +110,64 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           console.warn('[ClientDashboard] Consulta pase offline local:', e)
         }
 
-        // 1. Consultar tiquetera y créditos disponibles
+        if (!clienteId) {
+          if (isMounted) {
+            setReservas([])
+            setCreditosDisponibles(0)
+            setTiqueteraActiva(null)
+            setMetricasGamificacion(null)
+            setLoading(false)
+            setLoadingMetricas(false)
+          }
+          return
+        }
+
+        const metricasPromise = Promise.resolve(obtenerMetricasUsuario(clienteId)).catch((err: unknown) => {
+          console.warn('[ClientDashboard] Error obteniendo métricas de gamificación:', err)
+          return null
+        })
+
         const [tiqRes, credTotalRes, reservasRes] = await Promise.all([
           tiqueterasService.getTiqueteraActiva(clienteId, empresaId),
           tiqueterasService.getTotalCreditosDisponibles(clienteId, empresaId),
           reservasService.getReservasCliente(clienteId, { empresaId }),
         ])
+        const metricasRes: unknown = await metricasPromise
 
         if (isMounted) {
-          if (tiqRes.data) {
-            setTiqueteraActiva(tiqRes.data)
+          const metricasParsed = extraerMetricasGamificacion(metricasRes)
+          setMetricasGamificacion(metricasParsed)
+          setLoadingMetricas(false)
+
+          setTiqueteraActiva(tiqRes.data || null)
+          setCreditosDisponibles(credTotalRes.data ?? 0)
+
+          if (reservasRes.error) {
+            toast({
+              variant: 'destructive',
+              title: 'Error cargando tus reservas',
+              description: reservasRes.error,
+            })
           }
 
-          if (credTotalRes.data !== null && credTotalRes.data > 0) {
-            setCreditosDisponibles(credTotalRes.data)
-          } else {
-            setCreditosDisponibles(5) // Demo fallback de 5 créditos
-          }
-
-          const listaFinal = reservasRes.data && reservasRes.data.length > 0 ? reservasRes.data : fallbackReservas
+          const listaFinal: ReservaDetallada[] = reservasRes.data || []
           setReservas(listaFinal)
 
-          // Auto-guardar la próxima reserva confirmada en almacenamiento offline
           const proxima = listaFinal.find((r) => r.estado === 'confirmada' && !r.asistencia_confirmada)
           if (proxima) {
             try {
               const passPayload: ReservaPaseOffline = {
                 reservaId: proxima.id,
                 codigoQR: proxima.codigo_qr || `PASS-${proxima.id}`,
-                clienteNombre: proxima.cliente_nombre || currentUser?.nombre_completo || 'Alejandro Vargas',
+                clienteNombre: proxima.cliente_nombre || currentUser?.nombre_completo || 'Ciclista',
                 clienteDocumento: proxima.cliente_documento || currentUser?.documento,
-                claseTitulo: proxima.clase?.titulo || 'Power Cycling & Beats',
-                instructorNombre: proxima.clase?.instructor_id || 'Camila Rossi',
-                bicicletaNumero: proxima.bicicleta?.numero || 4,
+                claseTitulo: proxima.clase?.titulo || 'Sesión Indoor',
+                instructorNombre: proxima.clase?.instructor_id || 'Coach',
+                bicicletaNumero: proxima.bicicleta?.numero || 1,
                 fecha: proxima.clase?.fecha || new Date().toISOString().split('T')[0],
-                horaInicio: proxima.clase?.hora_inicio || '18:30:00',
-                horaFin: proxima.clase?.hora_fin || '19:20:00',
-                estudioNombre: 'VELO-X Cycling Studio',
+                horaInicio: proxima.clase?.hora_inicio || '07:00:00',
+                horaFin: proxima.clase?.hora_fin || '07:45:00',
+                estudioNombre: studioName,
                 colorPrimario: currentPalette.primaryHex,
                 guardadoEn: new Date().toISOString(),
               }
@@ -239,13 +179,20 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           }
         }
       } catch (err) {
-        console.warn('Carga de datos con fallback local:', err)
+        const msg = err instanceof Error ? err.message : 'Error al cargar tus datos'
         if (isMounted) {
-          setReservas(fallbackReservas)
-          setCreditosDisponibles(5)
+          setFeedbackMessage({ type: 'error', text: msg })
+          toast({ variant: 'destructive', title: 'Error', description: msg })
+          setReservas([])
+          setCreditosDisponibles(0)
+          setMetricasGamificacion(null)
+          setLoadingMetricas(false)
         }
       } finally {
-        if (isMounted) setLoading(false)
+        if (isMounted) {
+          setLoading(false)
+          setLoadingMetricas(false)
+        }
       }
     }
 
@@ -253,7 +200,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     return () => {
       isMounted = false
     }
-  }, [clienteId, empresaId, currentUser, currentPalette.primaryHex])
+  }, [clienteId, empresaId, currentUser, currentPalette.primaryHex, studioName])
 
   // Confirmar y procesar cancelación mediante reservasService.cancelarReserva
   const procesarCancelacionConfirmada = async () => {
@@ -277,31 +224,37 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           setCreditosDisponibles((prev) => prev + 1)
         }
 
+        const textoFinal = `${mensaje || 'Reserva cancelada exitosamente.'} ${
+          creditos_reintegrados
+            ? `Se reintegró 1 crédito a tu tiquetera. Saldo actual: ${
+                nuevo_saldo ?? creditosDisponibles + 1
+              } créditos.`
+            : 'Por realizarse con menos de 2 horas de antelación, el crédito no fue reintegrado.'
+        }`
+
         setFeedbackMessage({
           type: creditos_reintegrados ? 'success' : 'info',
-          text: `${mensaje || 'Reserva cancelada exitosamente.'} ${
-            creditos_reintegrados
-              ? `Se reintegró 1 crédito a tu tiquetera. Saldo actual: ${nuevo_saldo ?? creditosDisponibles + 1} créditos.`
-              : 'Por realizarse con menos de 2 horas de antelación, el crédito no fue reintegrado.'
-          }`,
+          text: textoFinal,
+        })
+        toast({
+          variant: creditos_reintegrados ? 'success' : 'default',
+          title: 'Reserva cancelada',
+          description: textoFinal,
         })
       } else {
-        // En modo demostración si no hay respuesta de BD
-        setReservas((prev) =>
-          prev.map((r) => (r.id === reservaParaCancelar.id ? { ...r, estado: 'cancelada' } : r))
-        )
-        setCreditosDisponibles((prev) => prev + 1)
-        setFeedbackMessage({
-          type: 'success',
-          text: 'Reserva cancelada en la sesión. Se reintegró 1 crédito automáticamente a tu saldo.',
+        const errMsg = res.error || res.mensaje || 'No se pudo cancelar la reserva.'
+        setFeedbackMessage({ type: 'error', text: errMsg })
+        toast({
+          variant: 'destructive',
+          title: 'No se pudo cancelar',
+          description: errMsg,
         })
       }
     } catch (err) {
-      console.error('Error al cancelar reserva:', err)
-      setFeedbackMessage({
-        type: 'error',
-        text: 'Ocurrió un error al procesar la cancelación de tu reserva.',
-      })
+      const errMsg =
+        err instanceof Error ? err.message : 'Ocurrió un error al procesar la cancelación.'
+      setFeedbackMessage({ type: 'error', text: errMsg })
+      toast({ variant: 'destructive', title: 'Error', description: errMsg })
     } finally {
       setCancellingLoading(false)
       setReservaParaCancelar(null)
@@ -325,12 +278,28 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
       {/* Barra Superior del Cliente */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-6">
         <div>
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
               Hola, {currentUser?.nombre_completo || 'Alejandro'} 👋
             </h1>
             <Badge variant="secondary" className="text-xs">
               Ciclista Activo
+            </Badge>
+            <Badge
+              variant="outline"
+              className="text-xs font-bold gap-1.5 border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+            >
+              <Trophy className="w-3.5 h-3.5 text-amber-500" />
+              {loadingMetricas ? (
+                <span>Cargando ranking...</span>
+              ) : (
+                <span>
+                  {(metricasGamificacion?.puntos_acumulados ?? 0).toLocaleString('es-CO')} pts • Ranking #
+                  {metricasGamificacion?.ranking_clase && metricasGamificacion.ranking_clase > 0
+                    ? metricasGamificacion.ranking_clase
+                    : '--'}
+                </span>
+              )}
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground">
@@ -443,13 +412,15 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
               <div className="flex justify-between">
                 <span>Plan Actual:</span>
                 <span className="font-semibold text-foreground">
-                  {tiqueteraActiva?.plan?.nombre || 'Pack 10 Clases Pro'}
+                  {tiqueteraActiva?.plan?.nombre || 'Sin tiquetera activa'}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span>Vencimiento:</span>
                 <span className="font-medium text-amber-600 dark:text-amber-400">
-                  {tiqueteraActiva?.fecha_vencimiento || '30 Días restantes'}
+                  {tiqueteraActiva?.fecha_vencimiento
+                    ? tiqueteraActiva.fecha_vencimiento.split('T')[0]
+                    : '—'}
                 </span>
               </div>
             </div>
@@ -542,7 +513,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           <CardHeader className="p-5 pb-2">
             <div className="flex justify-between items-start">
               <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Rendimiento & Racha
+                Rendimiento & Gamificación
               </span>
               <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center">
                 <Flame className="w-4 h-4" />
@@ -551,20 +522,25 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
           </CardHeader>
           <CardContent className="p-5 pt-0 space-y-3">
             <div className="flex items-baseline gap-2">
-              <span className="text-4xl font-black text-amber-500">12</span>
-              <span className="text-sm font-semibold text-muted-foreground">sesiones completadas</span>
+              <span className="text-4xl font-black text-amber-500">
+                {(metricasGamificacion?.puntos_acumulados ?? 0).toLocaleString('es-CO')}
+              </span>
+              <span className="text-sm font-semibold text-muted-foreground">puntos acumulados</span>
             </div>
 
             <div className="text-xs text-muted-foreground space-y-1 border-t pt-2.5">
               <div className="flex justify-between items-center">
-                <span>Racha semanal:</span>
+                <span>Ranking de clase:</span>
                 <span className="font-bold text-foreground flex items-center gap-1">
-                  <Award className="w-3.5 h-3.5 text-amber-500" /> Nivel Rider Avanzado
+                  <Award className="w-3.5 h-3.5 text-amber-500" />{' '}
+                  {metricasGamificacion?.ranking_clase && metricasGamificacion.ranking_clase > 0
+                    ? `Puesto #${metricasGamificacion.ranking_clase}`
+                    : 'Sin ranking aún'}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span>Puesto favorito:</span>
-                <span className="font-semibold text-foreground">Bicicleta #04 (Fila 1)</span>
+                <span>Total de reservas:</span>
+                <span className="font-semibold text-foreground">{reservas.length} sesiones</span>
               </div>
             </div>
           </CardContent>

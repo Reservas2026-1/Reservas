@@ -7,13 +7,25 @@ export type {
   AuthSessionData,
 } from './authService'
 
-export { clasesService } from './clasesService'
+export {
+  clasesService,
+  generarProgramacionMasiva,
+  crearClaseEspecial,
+} from './clasesService'
 export type {
   BicicletaOcupacion,
   ClaseConOcupacion,
+  ActualizarClaseParams,
+  CrearHorarioBaseParams,
+  ActualizarHorarioBaseParams,
 } from './clasesService'
 
-export { reservasService } from './reservasService'
+export {
+  reservasService,
+  tiquetesService,
+  crearReservasLote,
+  cancelarReservaRapida,
+} from './reservasService'
 export type {
   CrearReservaParams,
   ReservaDetallada,
@@ -21,12 +33,22 @@ export type {
   InscribirListaEsperaResult,
   EstadoListaEsperaUsuario,
   AlumnoEnEspera,
+  DeduccionTiqueteraItem,
+  DeducirCreditosResponse,
+  ReembolsarCreditosResponse,
+  CrearReservasLoteData,
+  CrearReservasLoteResponse,
+  CancelarReservaRapidaResponse,
 } from './reservasService'
 
 export { tiqueterasService } from './tiqueterasService'
 export type {
   TiqueteraConPlan,
   SolicitudCompraPlanParams,
+  CrearPlanParams,
+  ActualizarPlanParams,
+  AsignarTiqueteraManualParams,
+  ActualizarTiqueteraParams,
 } from './tiqueterasService'
 
 export { pagosService } from './pagosService'
@@ -42,9 +64,17 @@ export type {
   AlumnoInscrito,
   ClaseAdminDetalle,
   CrearClaseParams,
+  ActualizarClienteParams,
+  RegistrarMovimientoCajaParams,
   ClienteConTiqueteraResumen,
   DesgloseMetodoPago,
   CierreCajaResumen,
+  PeriodoEstadisticas,
+  GranularidadEstadisticas,
+  PuntoEstadisticaIngresos,
+  EstadisticasIngresosResumen,
+  PagosFiltros,
+  PagoFiltradoDetallado,
 } from './adminService'
 
 export { empresasService } from './empresasService'
@@ -59,3 +89,6 @@ export { offlineService } from './offlineService'
 export type {
   ReservaPaseOffline,
 } from './offlineService'
+
+export { metricasService, obtenerMetricasUsuario } from './metricasService'
+export type { MetricasUsuario } from './metricasService'

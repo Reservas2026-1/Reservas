@@ -1,14 +1,53 @@
 import { supabase } from '../lib/supabase'
+import {
+  clasesService,
+  type ActualizarClaseParams,
+  type CrearHorarioBaseParams,
+  type ActualizarHorarioBaseParams,
+} from './clasesService'
+import {
+  tiqueterasService,
+  type TiqueteraConPlan,
+  type CrearPlanParams,
+  type ActualizarPlanParams,
+  type AsignarTiqueteraManualParams,
+  type ActualizarTiqueteraParams,
+} from './tiqueterasService'
 import type {
   Tables,
   TablesInsert,
   MetodoPago,
+  EstadoPago,
+  TablesUpdate,
+  TipoMovimiento,
   AprobarPagoYActivarPlanResponse,
 } from '../types/database'
 
 export interface ServiceResponse<T> {
   data: T | null
   error: string | null
+}
+
+export interface ActualizarClienteParams {
+  nombreCompleto?: string
+  documento?: string | null
+  telefono?: string | null
+  email?: string
+  avatarUrl?: string | null
+  activo?: boolean
+}
+
+export interface RegistrarMovimientoCajaParams {
+  empresaId: string
+  tipo: TipoMovimiento
+  concepto: string
+  monto: number
+  metodo?: MetodoPago
+  responsable: string
+  usuarioId?: string | null
+  reservaId?: string | null
+  pagoId?: string | null
+  fecha?: string
 }
 
 export interface DashboardMetricas {
@@ -80,6 +119,470 @@ export interface DesgloseMetodoPago {
   cantidadTransacciones: number
 }
 
+export type PeriodoEstadisticas = 'semana' | 'mes' | 'anio'
+export type GranularidadEstadisticas = 'diaria' | 'mensual'
+
+export interface PuntoEstadisticaIngresos {
+  fecha: string
+  etiqueta: string
+  ingresosCobrados: number
+  valorUtilizadoPlanes: number
+  diferenciaNeta: number
+}
+
+export interface EstadisticasIngresosResumen {
+  periodo: PeriodoEstadisticas
+  granularidad: GranularidadEstadisticas
+  fechaInicio: string
+  fechaFin: string
+  totalIngresosCobrados: number
+  totalValorUtilizadoPlanes: number
+  series: PuntoEstadisticaIngresos[]
+}
+
+export interface PagosFiltros {
+  /** Fecha inicial inclusive ('YYYY-MM-DD' o ISO) */
+  fechaInicio?: string
+  /** Fecha final inclusive ('YYYY-MM-DD' o ISO) */
+  fechaFin?: string
+  /** Método de pago ('efectivo', 'nequi', 'bancolombia', 'wompi', etc.) */
+  metodo?: MetodoPago | 'todos'
+  /** Código de referencia de transacción, código QR de reserva, notas o ID de pago */
+  codigo?: string
+  /** Estado del pago opcional */
+  estado?: EstadoPago | 'todos'
+}
+
+export interface PagoFiltradoDetallado extends Tables<'pagos'> {
+  cliente: Tables<'perfiles'> | null
+  plan: Tables<'planes'> | null
+  reserva: Tables<'reservas'> | null
+}
+
+const PERIODOS_ESTADISTICAS = new Set<PeriodoEstadisticas>(['semana', 'mes', 'anio'])
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function formatLocalMonth(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
+}
+
+function roundCurrency(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+function toLocalBoundaryIso(dateStr: string, endOfDay: boolean): string {
+  if (dateStr.includes('T')) {
+    return dateStr
+  }
+  const [y, m, d] = dateStr.split('-').map(Number)
+  if (!y || !m || !d) {
+    return endOfDay ? `${dateStr}T23:59:59.999` : `${dateStr}T00:00:00.000`
+  }
+  const boundary = new Date(
+    y,
+    m - 1,
+    d,
+    endOfDay ? 23 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 999 : 0
+  )
+  return boundary.toISOString()
+}
+
+function extraerClaveFecha(
+  rawFecha: string | null | undefined,
+  granularidad: GranularidadEstadisticas
+): string | null {
+  if (!rawFecha) return null
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rawFecha)) {
+    return granularidad === 'mensual' ? rawFecha.slice(0, 7) : rawFecha
+  }
+  const parsed = new Date(rawFecha)
+  if (Number.isNaN(parsed.getTime())) {
+    const fallback = rawFecha.split('T')[0]
+    return granularidad === 'mensual' ? fallback.slice(0, 7) : fallback
+  }
+  return granularidad === 'mensual' ? formatLocalMonth(parsed) : formatLocalDate(parsed)
+}
+
+async function resolveEmpresaId(explicitEmpresaId?: string): Promise<string | undefined> {
+  if (explicitEmpresaId && explicitEmpresaId.trim().length > 0) {
+    return explicitEmpresaId.trim()
+  }
+  try {
+    const { data: authData } = await supabase.auth.getUser()
+    const userId = authData?.user?.id
+    if (!userId) return undefined
+
+    const { data: perfil } = await supabase
+      .from('perfiles')
+      .select('empresa_id')
+      .eq('id', userId)
+      .maybeSingle()
+
+    return perfil?.empresa_id || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function construirRangoYBuckets(periodo: PeriodoEstadisticas): {
+  granularidad: GranularidadEstadisticas
+  fechaInicio: string
+  fechaFin: string
+  buckets: Array<{ fecha: string; etiqueta: string }>
+} {
+  const ahora = new Date()
+  const base = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate())
+
+  if (periodo === 'anio') {
+    const buckets: Array<{ fecha: string; etiqueta: string }> = []
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(base.getFullYear(), base.getMonth() - i, 1)
+      buckets.push({
+        fecha: formatLocalMonth(d),
+        etiqueta: d.toLocaleDateString('es-CO', { month: 'short', year: 'numeric' }),
+      })
+    }
+    const finMes = new Date(base.getFullYear(), base.getMonth() + 1, 0)
+    return {
+      granularidad: 'mensual',
+      fechaInicio: `${buckets[0].fecha}-01`,
+      fechaFin: formatLocalDate(finMes),
+      buckets,
+    }
+  }
+
+  const totalDias = periodo === 'semana' ? 7 : 30
+  const buckets: Array<{ fecha: string; etiqueta: string }> = []
+  for (let i = totalDias - 1; i >= 0; i--) {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() - i)
+    buckets.push({
+      fecha: formatLocalDate(d),
+      etiqueta:
+        periodo === 'semana'
+          ? d.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric' })
+          : d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }),
+    })
+  }
+
+  return {
+    granularidad: 'diaria',
+    fechaInicio: buckets[0].fecha,
+    fechaFin: buckets[buckets.length - 1].fecha,
+    buckets,
+  }
+}
+
+async function getEstadisticasIngresosImpl(
+  periodo: PeriodoEstadisticas,
+  empresaId?: string
+): Promise<ServiceResponse<EstadisticasIngresosResumen>>
+async function getEstadisticasIngresosImpl(
+  empresaId: string,
+  periodo: PeriodoEstadisticas
+): Promise<ServiceResponse<EstadisticasIngresosResumen>>
+async function getEstadisticasIngresosImpl(
+  arg1: PeriodoEstadisticas | string,
+  arg2?: PeriodoEstadisticas | string
+): Promise<ServiceResponse<EstadisticasIngresosResumen>> {
+  try {
+    let periodo: PeriodoEstadisticas
+    let empresaIdArg: string | undefined
+
+    if (PERIODOS_ESTADISTICAS.has(arg1 as PeriodoEstadisticas)) {
+      periodo = arg1 as PeriodoEstadisticas
+      empresaIdArg = typeof arg2 === 'string' ? arg2 : undefined
+    } else {
+      empresaIdArg = arg1
+      periodo = arg2 as PeriodoEstadisticas
+    }
+
+    if (!PERIODOS_ESTADISTICAS.has(periodo)) {
+      return {
+        data: null,
+        error: "Período inválido. Debe ser 'semana', 'mes' o 'anio'.",
+      }
+    }
+
+    const empresaId = await resolveEmpresaId(empresaIdArg)
+    const { granularidad, fechaInicio, fechaFin, buckets } = construirRangoYBuckets(periodo)
+    const inicioIso = toLocalBoundaryIso(fechaInicio, false)
+    const finIso = toLocalBoundaryIso(fechaFin, true)
+
+    let movQuery = supabase
+      .from('movimientos_caja')
+      .select('id, tipo, monto, fecha, pago_id')
+      .eq('tipo', 'ingreso')
+      .gte('fecha', inicioIso)
+      .lte('fecha', finIso)
+
+    let pagosQuery = supabase
+      .from('pagos')
+      .select('id, monto, fecha_pago, estado')
+      .eq('estado', 'aprobado')
+      .gte('fecha_pago', inicioIso)
+      .lte('fecha_pago', finIso)
+
+    let reservasQuery = supabase
+      .from('reservas')
+      .select(`
+        id,
+        fecha_reserva,
+        fecha_inicio,
+        estado,
+        tiquetera_id,
+        tiquetera:tiqueteras!reservas_tiquetera_id_fkey(
+          id,
+          creditos_totales,
+          plan:planes!tiqueteras_plan_id_fkey(id, precio, creditos)
+        )
+      `)
+      .not('tiquetera_id', 'is', null)
+      .neq('estado', 'cancelada')
+      .gte('fecha_reserva', fechaInicio)
+      .lte('fecha_reserva', fechaFin)
+
+    if (empresaId) {
+      movQuery = movQuery.eq('empresa_id', empresaId)
+      pagosQuery = pagosQuery.eq('empresa_id', empresaId)
+      reservasQuery = reservasQuery.eq('empresa_id', empresaId)
+    }
+
+    const [movRes, pagosRes, reservasRes] = await Promise.all([
+      movQuery,
+      pagosQuery,
+      reservasQuery,
+    ])
+
+    if (movRes.error) {
+      return { data: null, error: movRes.error.message }
+    }
+    if (pagosRes.error) {
+      return { data: null, error: pagosRes.error.message }
+    }
+    if (reservasRes.error) {
+      return { data: null, error: reservasRes.error.message }
+    }
+
+    const acumuladoPorClave = new Map<
+      string,
+      { ingresosCobrados: number; valorUtilizadoPlanes: number }
+    >()
+    for (const bucket of buckets) {
+      acumuladoPorClave.set(bucket.fecha, {
+        ingresosCobrados: 0,
+        valorUtilizadoPlanes: 0,
+      })
+    }
+
+    // 1. Ingresos cobrados: movimientos_caja tipo 'ingreso' + pagos aprobados sin movimiento vinculado
+    const pagoIdsEnCaja = new Set<string>()
+    for (const mov of movRes.data || []) {
+      if (mov.pago_id) {
+        pagoIdsEnCaja.add(mov.pago_id)
+      }
+      const clave = extraerClaveFecha(mov.fecha, granularidad)
+      if (!clave) continue
+      const bucket = acumuladoPorClave.get(clave)
+      if (bucket) {
+        bucket.ingresosCobrados += Number(mov.monto || 0)
+      }
+    }
+
+    for (const pago of pagosRes.data || []) {
+      if (pagoIdsEnCaja.has(pago.id)) continue
+      const clave = extraerClaveFecha(pago.fecha_pago, granularidad)
+      if (!clave) continue
+      const bucket = acumuladoPorClave.get(clave)
+      if (bucket) {
+        bucket.ingresosCobrados += Number(pago.monto || 0)
+      }
+    }
+
+    // 2. Valor utilizado de planes: valor unitario del crédito consumido por cada reserva activa con tiquetera
+    for (const reserva of reservasRes.data || []) {
+      const clave = extraerClaveFecha(
+        reserva.fecha_reserva || reserva.fecha_inicio,
+        granularidad
+      )
+      if (!clave) continue
+      const bucket = acumuladoPorClave.get(clave)
+      if (!bucket) continue
+
+      const tiquetera = reserva.tiquetera as unknown as {
+        id: string
+        creditos_totales: number
+        plan: { id: string; precio: number; creditos: number } | null
+      } | null
+
+      const precioPlan = Number(tiquetera?.plan?.precio || 0)
+      const creditosPlan = Number(
+        tiquetera?.creditos_totales || tiquetera?.plan?.creditos || 0
+      )
+
+      if (precioPlan > 0 && creditosPlan > 0) {
+        bucket.valorUtilizadoPlanes += precioPlan / creditosPlan
+      }
+    }
+
+    let totalIngresosCobrados = 0
+    let totalValorUtilizadoPlanes = 0
+
+    const series: PuntoEstadisticaIngresos[] = buckets.map((b) => {
+      const valores = acumuladoPorClave.get(b.fecha)!
+      const ingresosCobrados = roundCurrency(valores.ingresosCobrados)
+      const valorUtilizadoPlanes = roundCurrency(valores.valorUtilizadoPlanes)
+      totalIngresosCobrados += ingresosCobrados
+      totalValorUtilizadoPlanes += valorUtilizadoPlanes
+
+      return {
+        fecha: b.fecha,
+        etiqueta: b.etiqueta,
+        ingresosCobrados,
+        valorUtilizadoPlanes,
+        diferenciaNeta: roundCurrency(ingresosCobrados - valorUtilizadoPlanes),
+      }
+    })
+
+    return {
+      data: {
+        periodo,
+        granularidad,
+        fechaInicio,
+        fechaFin,
+        totalIngresosCobrados: roundCurrency(totalIngresosCobrados),
+        totalValorUtilizadoPlanes: roundCurrency(totalValorUtilizadoPlanes),
+        series,
+      },
+      error: null,
+    }
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'Error al calcular estadísticas de ingresos'
+    return { data: null, error: message }
+  }
+}
+
+async function getPagosFiltradosImpl(
+  empresaId: string,
+  filtros?: PagosFiltros
+): Promise<ServiceResponse<PagoFiltradoDetallado[]>>
+async function getPagosFiltradosImpl(
+  filtros?: PagosFiltros & { empresaId?: string }
+): Promise<ServiceResponse<PagoFiltradoDetallado[]>>
+async function getPagosFiltradosImpl(
+  arg1?: string | (PagosFiltros & { empresaId?: string }),
+  arg2?: PagosFiltros
+): Promise<ServiceResponse<PagoFiltradoDetallado[]>> {
+  try {
+    let empresaIdArg: string | undefined
+    let filtros: PagosFiltros
+
+    if (typeof arg1 === 'string') {
+      empresaIdArg = arg1
+      filtros = arg2 || {}
+    } else {
+      filtros = arg1 || {}
+      empresaIdArg = arg1?.empresaId
+    }
+
+    const empresaId = await resolveEmpresaId(empresaIdArg)
+
+    let query = supabase
+      .from('pagos')
+      .select(`
+        *,
+        cliente:perfiles!pagos_cliente_id_fkey(*),
+        plan:planes!pagos_plan_id_fkey(*),
+        reserva:reservas!pagos_reserva_id_fkey(*)
+      `)
+      .order('fecha_pago', { ascending: false })
+
+    if (empresaId) {
+      query = query.eq('empresa_id', empresaId)
+    }
+
+    if (filtros.fechaInicio) {
+      query = query.gte('fecha_pago', toLocalBoundaryIso(filtros.fechaInicio, false))
+    }
+
+    if (filtros.fechaFin) {
+      query = query.lte('fecha_pago', toLocalBoundaryIso(filtros.fechaFin, true))
+    }
+
+    if (filtros.metodo && filtros.metodo !== 'todos') {
+      query = query.eq('metodo', filtros.metodo)
+    }
+
+    if (filtros.estado && filtros.estado !== 'todos') {
+      query = query.eq('estado', filtros.estado)
+    }
+
+    const codigoLimpio = filtros.codigo?.trim()
+    if (codigoLimpio) {
+      const terminoSeguro = codigoLimpio.replace(/[,()]/g, '')
+      if (terminoSeguro.length > 0) {
+        let reservasQuery = supabase
+          .from('reservas')
+          .select('id')
+          .ilike('codigo_qr', `%${terminoSeguro}%`)
+
+        if (empresaId) {
+          reservasQuery = reservasQuery.eq('empresa_id', empresaId)
+        }
+
+        const { data: reservasCoincidentes } = await reservasQuery
+        const reservaIds = (reservasCoincidentes || []).map((r) => r.id)
+
+        const orConditions = [
+          `referencia_transaccion.ilike.%${terminoSeguro}%`,
+          `notas.ilike.%${terminoSeguro}%`,
+        ]
+
+        if (UUID_REGEX.test(terminoSeguro)) {
+          orConditions.push(`id.eq.${terminoSeguro}`)
+        }
+
+        if (reservaIds.length > 0) {
+          orConditions.push(`reserva_id.in.(${reservaIds.join(',')})`)
+        }
+
+        query = query.or(orConditions.join(','))
+      }
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      return { data: null, error: error.message }
+    }
+
+    const pagosMapeados: PagoFiltradoDetallado[] = (data || []).map((item) => ({
+      ...item,
+      cliente: (item.cliente as unknown as Tables<'perfiles'>) || null,
+      plan: (item.plan as unknown as Tables<'planes'>) || null,
+      reserva: (item.reserva as unknown as Tables<'reservas'>) || null,
+    }))
+
+    return { data: pagosMapeados, error: null }
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'Error al consultar pagos filtrados'
+    return { data: null, error: message }
+  }
+}
+
 export interface CierreCajaResumen {
   fecha: string
   totalIngresos: number
@@ -94,6 +597,18 @@ export interface CierreCajaResumen {
  * Servicio Backend para el Panel Administrativo (Métricas, Control de Clases, Caja y Clientes)
  */
 export const adminService = {
+  /**
+   * Obtiene series temporales (diarias o mensuales) de ingresos para gráficos administrativos,
+   * separando "Ingresos cobrados" (pagos aprobados / ingresos en caja) y
+   * "Valor utilizado de planes" (equivalente monetario de créditos consumidos en reservas).
+   */
+  getEstadisticasIngresos: getEstadisticasIngresosImpl,
+
+  /**
+   * Consulta el historial de pagos con filtros opcionales por rango de fechas,
+   * método de pago, código (referencia de transacción, QR de reserva o ID) y estado.
+   */
+  getPagosFiltrados: getPagosFiltradosImpl,
   /**
    * Calcula las métricas ejecutivas clave para el dashboard del administrador:
    * ingresos del día, ingresos del mes, ocupación promedio de clases, clientes y clases activas.
@@ -563,6 +1078,323 @@ export const adminService = {
    * Genera el arqueo o cierre de caja financiero del día para una empresa,
    * desglosado por método de pago y balance total de ingresos vs egresos.
    */
+  /**
+   * Edita los datos de perfil de un cliente perteneciente a la empresa.
+   */
+  async actualizarCliente(
+    clienteId: string,
+    empresaId: string,
+    data: ActualizarClienteParams
+  ): Promise<ServiceResponse<Tables<'perfiles'>>> {
+    try {
+      if (!clienteId?.trim() || !empresaId?.trim()) {
+        return { data: null, error: 'clienteId y empresaId son obligatorios' }
+      }
+
+      if (data.nombreCompleto !== undefined && !data.nombreCompleto.trim()) {
+        return { data: null, error: 'El nombre completo del cliente no puede estar vacío' }
+      }
+
+      const updatePayload: TablesUpdate<'perfiles'> = {
+        updated_at: new Date().toISOString(),
+      }
+
+      if (data.nombreCompleto !== undefined) {
+        updatePayload.nombre_completo = data.nombreCompleto.trim()
+      }
+      if (data.documento !== undefined) {
+        updatePayload.documento = data.documento ? data.documento.trim() : null
+      }
+      if (data.telefono !== undefined) {
+        updatePayload.telefono = data.telefono ? data.telefono.trim() : null
+      }
+      if (data.email !== undefined) {
+        updatePayload.email = data.email.trim().toLowerCase()
+      }
+      if (data.avatarUrl !== undefined) {
+        updatePayload.avatar_url = data.avatarUrl ? data.avatarUrl.trim() : null
+      }
+      if (data.activo !== undefined) {
+        updatePayload.activo = data.activo
+      }
+
+      const { data: updated, error } = await supabase
+        .from('perfiles')
+        .update(updatePayload)
+        .eq('id', clienteId)
+        .eq('empresa_id', empresaId)
+        .eq('rol', 'cliente')
+        .select('*')
+        .maybeSingle()
+
+      if (error) {
+        return { data: null, error: error.message }
+      }
+
+      if (!updated) {
+        return { data: null, error: 'Cliente no encontrado en esta empresa' }
+      }
+
+      return { data: updated, error: null }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error al actualizar datos del cliente'
+      return { data: null, error: message }
+    }
+  },
+
+  /**
+   * Lista todas las tiqueteras de un cliente dentro de la empresa para gestión administrativa.
+   */
+  async getTiqueterasCliente(
+    clienteId: string,
+    empresaId: string
+  ): Promise<ServiceResponse<TiqueteraConPlan[]>> {
+    return tiqueterasService.getTiqueterasPorEmpresa(empresaId, clienteId)
+  },
+
+  /**
+   * Asigna manualmente una tiquetera a un cliente (con créditos y vigencia configurables).
+   */
+  async asignarTiqueteraManual(
+    params: AsignarTiqueteraManualParams
+  ): Promise<ServiceResponse<TiqueteraConPlan>> {
+    return tiqueterasService.asignarTiqueteraManual(params)
+  },
+
+  /**
+   * Edita créditos, vigencia, plan o estado de una tiquetera asignada.
+   */
+  async actualizarTiquetera(
+    tiqueteraId: string,
+    empresaId: string,
+    data: ActualizarTiqueteraParams
+  ): Promise<ServiceResponse<TiqueteraConPlan>> {
+    return tiqueterasService.actualizarTiquetera(tiqueteraId, empresaId, data)
+  },
+
+  /**
+   * Elimina una tiquetera de un cliente en la empresa.
+   */
+  async eliminarTiquetera(
+    tiqueteraId: string,
+    empresaId: string
+  ): Promise<{ success: boolean; error: string | null }> {
+    return tiqueterasService.eliminarTiquetera(tiqueteraId, empresaId)
+  },
+
+  /**
+   * Lista todos los planes (activos e inactivos) de la empresa.
+   */
+  async getTodosLosPlanes(empresaId: string): Promise<ServiceResponse<Tables<'planes'>[]>> {
+    return tiqueterasService.getTodosLosPlanes(empresaId)
+  },
+
+  /**
+   * Crea un nuevo plan o paquete de créditos para la empresa.
+   */
+  async crearPlan(params: CrearPlanParams): Promise<ServiceResponse<Tables<'planes'>>> {
+    return tiqueterasService.crearPlan(params)
+  },
+
+  /**
+   * Edita precio, créditos, vigencia o descripción de un plan existente.
+   */
+  async actualizarPlan(
+    planId: string,
+    empresaId: string,
+    data: ActualizarPlanParams
+  ): Promise<ServiceResponse<Tables<'planes'>>> {
+    return tiqueterasService.actualizarPlan(planId, empresaId, data)
+  },
+
+  /**
+   * Activa o desactiva un plan en el catálogo de la empresa.
+   */
+  async cambiarEstadoPlan(
+    planId: string,
+    empresaId: string,
+    activo: boolean
+  ): Promise<ServiceResponse<Tables<'planes'>>> {
+    return tiqueterasService.cambiarEstadoPlan(planId, empresaId, activo)
+  },
+
+  /**
+   * Elimina un plan de la empresa.
+   */
+  async eliminarPlan(
+    planId: string,
+    empresaId: string
+  ): Promise<{ success: boolean; error: string | null }> {
+    return tiqueterasService.eliminarPlan(planId, empresaId)
+  },
+
+  /**
+   * Edita horario, instructor, capacidad o estado de una clase existente.
+   */
+  async actualizarClase(
+    claseId: string,
+    empresaId: string,
+    data: ActualizarClaseParams
+  ): Promise<ServiceResponse<Tables<'clases'>>> {
+    return clasesService.actualizarClase(claseId, empresaId, data)
+  },
+
+  /**
+   * Elimina una clase programada.
+   */
+  async eliminarClase(
+    claseId: string,
+    empresaId: string,
+    options?: { forzarConCancelacion?: boolean }
+  ): Promise<{ success: boolean; error: string | null }> {
+    return clasesService.eliminarClase(claseId, empresaId, options)
+  },
+
+  /**
+   * Lista horarios base de la empresa.
+   */
+  async getHorariosBase(
+    empresaId: string,
+    soloActivos?: boolean
+  ): Promise<ServiceResponse<Tables<'horarios_base'>[]>> {
+    return clasesService.getHorariosBase(empresaId, soloActivos)
+  },
+
+  /**
+   * Crea un horario base semanal.
+   */
+  async crearHorarioBase(
+    params: CrearHorarioBaseParams
+  ): Promise<ServiceResponse<Tables<'horarios_base'>>> {
+    return clasesService.crearHorarioBase(params)
+  },
+
+  /**
+   * Actualiza un horario base semanal.
+   */
+  async actualizarHorarioBase(
+    horarioId: string,
+    empresaId: string,
+    data: ActualizarHorarioBaseParams
+  ): Promise<ServiceResponse<Tables<'horarios_base'>>> {
+    return clasesService.actualizarHorarioBase(horarioId, empresaId, data)
+  },
+
+  /**
+   * Elimina un horario base semanal.
+   */
+  async eliminarHorarioBase(
+    horarioId: string,
+    empresaId: string
+  ): Promise<{ success: boolean; error: string | null }> {
+    return clasesService.eliminarHorarioBase(horarioId, empresaId)
+  },
+
+  /**
+   * Registra un movimiento manual de caja (ingreso o egreso) con su concepto/motivo.
+   */
+  async registrarMovimientoCaja(
+    params: RegistrarMovimientoCajaParams
+  ): Promise<ServiceResponse<Tables<'movimientos_caja'>>> {
+    try {
+      const {
+        empresaId,
+        tipo,
+        concepto,
+        monto,
+        metodo = 'efectivo',
+        responsable,
+        usuarioId = null,
+        reservaId = null,
+        pagoId = null,
+        fecha,
+      } = params
+
+      if (!empresaId?.trim()) {
+        return { data: null, error: 'El identificador de empresa es obligatorio' }
+      }
+
+      if (tipo !== 'ingreso' && tipo !== 'egreso') {
+        return { data: null, error: "El tipo de movimiento debe ser 'ingreso' o 'egreso'" }
+      }
+
+      if (!concepto?.trim()) {
+        return { data: null, error: 'El motivo o concepto del movimiento es obligatorio' }
+      }
+
+      if (!Number.isFinite(monto) || monto <= 0) {
+        return { data: null, error: 'El monto del movimiento debe ser mayor a 0' }
+      }
+
+      if (!responsable?.trim()) {
+        return { data: null, error: 'El responsable del movimiento es obligatorio' }
+      }
+
+      const payload: TablesInsert<'movimientos_caja'> = {
+        empresa_id: empresaId,
+        usuario_id: usuarioId,
+        tipo,
+        concepto: concepto.trim(),
+        monto,
+        metodo,
+        reserva_id: reservaId,
+        pago_id: pagoId,
+        responsable: responsable.trim(),
+        fecha: fecha || new Date().toISOString(),
+      }
+
+      const { data, error } = await supabase
+        .from('movimientos_caja')
+        .insert(payload)
+        .select('*')
+        .single()
+
+      if (error) {
+        return { data: null, error: error.message }
+      }
+
+      return { data, error: null }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error al registrar movimiento de caja'
+      return { data: null, error: message }
+    }
+  },
+
+  /**
+   * Elimina un movimiento de caja de la empresa.
+   */
+  async eliminarMovimientoCaja(
+    movimientoId: string,
+    empresaId: string
+  ): Promise<{ success: boolean; error: string | null }> {
+    try {
+      if (!movimientoId?.trim() || !empresaId?.trim()) {
+        return { success: false, error: 'movimientoId y empresaId son obligatorios' }
+      }
+
+      const { data, error } = await supabase
+        .from('movimientos_caja')
+        .delete()
+        .eq('id', movimientoId)
+        .eq('empresa_id', empresaId)
+        .select('id')
+        .maybeSingle()
+
+      if (error) {
+        return { success: false, error: error.message }
+      }
+
+      if (!data) {
+        return { success: false, error: 'Movimiento de caja no encontrado para esta empresa' }
+      }
+
+      return { success: true, error: null }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error al eliminar movimiento de caja'
+      return { success: false, error: message }
+    }
+  },
+
   async getCierreCaja(
     empresaId: string,
     fecha?: string

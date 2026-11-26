@@ -56,6 +56,659 @@ export interface AlumnoEnEspera extends Tables<'lista_espera'> {
   usuario: Tables<'perfiles'> | null
 }
 
+export interface DeduccionTiqueteraItem {
+  tiqueteraId: string
+  cantidad: number
+  estadoAnterior: Tables<'tiqueteras'>['estado']
+}
+
+export interface DeducirCreditosResponse {
+  success: boolean
+  deducciones: DeduccionTiqueteraItem[]
+  creditosRestantes: number
+  error: string | null
+}
+
+export interface ReembolsarCreditosResponse {
+  success: boolean
+  creditosReembolsados: number
+  nuevoSaldo: number | null
+  error: string | null
+}
+
+export interface TiquetesServiceContract {
+  deducirCreditos(userId: string, monto: number): Promise<DeducirCreditosResponse>
+  reembolsarCreditos(
+    userId: string,
+    monto: number,
+    tiqueteraId?: string | null,
+    deduccionesPrevias?: DeduccionTiqueteraItem[]
+  ): Promise<ReembolsarCreditosResponse>
+}
+
+export interface CrearReservasLoteData {
+  userId: string
+  claseIds: string[]
+  asignacionAutomatica: boolean
+  totalReservadas: number
+  creditosDeducidos: number
+  creditosRestantes: number
+}
+
+export interface CrearReservasLoteResponse {
+  success: boolean
+  data: CrearReservasLoteData | null
+  error: string | null
+}
+
+export interface CancelarReservaRapidaResponse {
+  success: boolean
+  reservaId: string
+  eliminada: boolean
+  creditosReembolsados: number
+  nuevoSaldo: number | null
+  mensaje: string
+  error: string | null
+}
+
+/**
+ * Servicio local de gestión de créditos sobre la tabla `tiqueteras` (tickets/planes)
+ * con control de concurrencia optimista y soporte de reversión compensatoria.
+ */
+export const tiquetesService: TiquetesServiceContract = {
+  /**
+   * Deduce `monto` créditos de las tiqueteras activas y vigentes del usuario,
+   * priorizando las próximas a vencer.
+   */
+  async deducirCreditos(userId: string, monto: number): Promise<DeducirCreditosResponse> {
+    const deduccionesAplicadas: DeduccionTiqueteraItem[] = []
+
+    try {
+      if (!userId || !userId.trim()) {
+        return {
+          success: false,
+          deducciones: [],
+          creditosRestantes: 0,
+          error: 'El identificador de usuario es obligatorio para deducir créditos',
+        }
+      }
+
+      if (!Number.isInteger(monto) || monto <= 0) {
+        return {
+          success: false,
+          deducciones: [],
+          creditosRestantes: 0,
+          error: 'El monto de créditos a deducir debe ser un número entero positivo',
+        }
+      }
+
+      const hoy = new Date().toISOString().split('T')[0]
+
+      const { data: tiqueteras, error: fetchError } = await supabase
+        .from('tiqueteras')
+        .select('*')
+        .eq('cliente_id', userId)
+        .eq('estado', 'activa')
+        .gt('creditos_disponibles', 0)
+        .gte('fecha_vencimiento', hoy)
+        .order('fecha_vencimiento', { ascending: true })
+
+      if (fetchError) {
+        return {
+          success: false,
+          deducciones: [],
+          creditosRestantes: 0,
+          error: fetchError.message,
+        }
+      }
+
+      const tiqueterasDisponibles = tiqueteras || []
+      const totalDisponible = tiqueterasDisponibles.reduce(
+        (acc, t) => acc + (t.creditos_disponibles || 0),
+        0
+      )
+
+      if (totalDisponible < monto) {
+        return {
+          success: false,
+          deducciones: [],
+          creditosRestantes: totalDisponible,
+          error: `Saldo insuficiente de créditos: tienes ${totalDisponible} disponible(s) y se requieren ${monto}.`,
+        }
+      }
+
+      let restantePorDeducir = monto
+
+      for (const tiquetera of tiqueterasDisponibles) {
+        if (restantePorDeducir <= 0) break
+
+        const disponibles = tiquetera.creditos_disponibles || 0
+        if (disponibles <= 0) continue
+
+        const aDescontar = Math.min(disponibles, restantePorDeducir)
+        const nuevoSaldo = disponibles - aDescontar
+        const nuevoEstado: Tables<'tiqueteras'>['estado'] =
+          nuevoSaldo === 0 ? 'agotada' : 'activa'
+
+        const { data: updatedRow, error: updateError } = await supabase
+          .from('tiqueteras')
+          .update({
+            creditos_disponibles: nuevoSaldo,
+            estado: nuevoEstado,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', tiquetera.id)
+          .eq('creditos_disponibles', disponibles)
+          .select('id')
+          .maybeSingle()
+
+        if (updateError || !updatedRow) {
+          if (deduccionesAplicadas.length > 0) {
+            await tiquetesService.reembolsarCreditos(userId, 0, null, deduccionesAplicadas)
+          }
+
+          return {
+            success: false,
+            deducciones: [],
+            creditosRestantes: totalDisponible,
+            error:
+              updateError?.message ||
+              'Conflicto de concurrencia al deducir créditos de la tiquetera. Intenta nuevamente.',
+          }
+        }
+
+        deduccionesAplicadas.push({
+          tiqueteraId: tiquetera.id,
+          cantidad: aDescontar,
+          estadoAnterior: tiquetera.estado,
+        })
+
+        restantePorDeducir -= aDescontar
+      }
+
+      return {
+        success: true,
+        deducciones: deduccionesAplicadas,
+        creditosRestantes: totalDisponible - monto,
+        error: null,
+      }
+    } catch (err) {
+      if (deduccionesAplicadas.length > 0) {
+        await tiquetesService.reembolsarCreditos(userId, 0, null, deduccionesAplicadas)
+      }
+      const message = err instanceof Error ? err.message : 'Error inesperado al deducir créditos'
+      return {
+        success: false,
+        deducciones: [],
+        creditosRestantes: 0,
+        error: message,
+      }
+    }
+  },
+
+  /**
+   * Reembolsa créditos al usuario, revirtiendo deducciones específicas (rollback)
+   * o reintegrando a la tiquetera vinculada/más reciente del usuario.
+   */
+  async reembolsarCreditos(
+    userId: string,
+    monto: number,
+    tiqueteraId: string | null = null,
+    deduccionesPrevias?: DeduccionTiqueteraItem[]
+  ): Promise<ReembolsarCreditosResponse> {
+    try {
+      if (deduccionesPrevias && deduccionesPrevias.length > 0) {
+        let totalRevertido = 0
+        let ultimoSaldo: number | null = null
+
+        for (const item of deduccionesPrevias) {
+          const { data: actual, error: fetchErr } = await supabase
+            .from('tiqueteras')
+            .select('id, creditos_disponibles')
+            .eq('id', item.tiqueteraId)
+            .maybeSingle()
+
+          if (fetchErr || !actual) {
+            return {
+              success: false,
+              creditosReembolsados: totalRevertido,
+              nuevoSaldo: ultimoSaldo,
+              error: fetchErr?.message || 'No se encontró la tiquetera para revertir créditos',
+            }
+          }
+
+          const saldoRestaurado = (actual.creditos_disponibles || 0) + item.cantidad
+          const { error: restoreErr } = await supabase
+            .from('tiqueteras')
+            .update({
+              creditos_disponibles: saldoRestaurado,
+              estado: item.estadoAnterior,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', item.tiqueteraId)
+            .eq('creditos_disponibles', actual.creditos_disponibles)
+
+          if (restoreErr) {
+            return {
+              success: false,
+              creditosReembolsados: totalRevertido,
+              nuevoSaldo: ultimoSaldo,
+              error: restoreErr.message,
+            }
+          }
+
+          totalRevertido += item.cantidad
+          ultimoSaldo = saldoRestaurado
+        }
+
+        return {
+          success: true,
+          creditosReembolsados: totalRevertido,
+          nuevoSaldo: ultimoSaldo,
+          error: null,
+        }
+      }
+
+      if (!userId || !userId.trim() || !Number.isInteger(monto) || monto <= 0) {
+        return {
+          success: false,
+          creditosReembolsados: 0,
+          nuevoSaldo: null,
+          error: 'Parámetros inválidos para reembolsar créditos',
+        }
+      }
+
+      let tiqueteraObjetivo: Tables<'tiqueteras'> | null = null
+
+      if (tiqueteraId) {
+        const { data, error } = await supabase
+          .from('tiqueteras')
+          .select('*')
+          .eq('id', tiqueteraId)
+          .eq('cliente_id', userId)
+          .maybeSingle()
+
+        if (error) {
+          return {
+            success: false,
+            creditosReembolsados: 0,
+            nuevoSaldo: null,
+            error: error.message,
+          }
+        }
+        tiqueteraObjetivo = data
+      } else {
+        const { data, error } = await supabase
+          .from('tiqueteras')
+          .select('*')
+          .eq('cliente_id', userId)
+          .in('estado', ['activa', 'agotada'])
+          .order('fecha_vencimiento', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (error) {
+          return {
+            success: false,
+            creditosReembolsados: 0,
+            nuevoSaldo: null,
+            error: error.message,
+          }
+        }
+        tiqueteraObjetivo = data
+      }
+
+      if (!tiqueteraObjetivo) {
+        return {
+          success: false,
+          creditosReembolsados: 0,
+          nuevoSaldo: null,
+          error: 'No se encontró una tiquetera elegible para reembolsar los créditos',
+        }
+      }
+
+      const saldoActual = tiqueteraObjetivo.creditos_disponibles || 0
+      const nuevoSaldo = saldoActual + monto
+      const nuevoEstado: Tables<'tiqueteras'>['estado'] =
+        tiqueteraObjetivo.estado === 'agotada' ? 'activa' : tiqueteraObjetivo.estado
+
+      const { data: updated, error: updateError } = await supabase
+        .from('tiqueteras')
+        .update({
+          creditos_disponibles: nuevoSaldo,
+          estado: nuevoEstado,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', tiqueteraObjetivo.id)
+        .eq('creditos_disponibles', saldoActual)
+        .select('id')
+        .maybeSingle()
+
+      if (updateError || !updated) {
+        return {
+          success: false,
+          creditosReembolsados: 0,
+          nuevoSaldo: null,
+          error:
+            updateError?.message ||
+            'Conflicto de concurrencia al reembolsar créditos en la tiquetera',
+        }
+      }
+
+      return {
+        success: true,
+        creditosReembolsados: monto,
+        nuevoSaldo,
+        error: null,
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error inesperado al reembolsar créditos'
+      return {
+        success: false,
+        creditosReembolsados: 0,
+        nuevoSaldo: null,
+        error: message,
+      }
+    }
+  },
+}
+
+/**
+ * Crea múltiples reservas semanales en lote invocando la RPC transaccional
+ * `public.crear_reservas_lote` y gestionando de forma atómica la deducción
+ * de créditos mediante `tiquetesService.deducirCreditos(userId, monto)`.
+ * Si la RPC falla, revierte automáticamente los créditos deducidos.
+ */
+export async function crearReservasLote(
+  userId: string,
+  claseIds: string[],
+  asignacionAutomatica: boolean = false
+): Promise<CrearReservasLoteResponse> {
+  if (!userId || !userId.trim()) {
+    return {
+      success: false,
+      data: null,
+      error: 'El ID de usuario es obligatorio para crear reservas en lote',
+    }
+  }
+
+  if (!Array.isArray(claseIds) || claseIds.length === 0) {
+    return {
+      success: false,
+      data: null,
+      error: 'Debe seleccionar al menos una clase para realizar la reserva múltiple',
+    }
+  }
+
+  const idsNormalizados = Array.from(
+    new Set(claseIds.map((id) => (typeof id === 'string' ? id.trim() : '')).filter(Boolean))
+  )
+
+  if (idsNormalizados.length === 0 || idsNormalizados.length !== claseIds.length) {
+    return {
+      success: false,
+      data: null,
+      error: 'La lista de clases contiene identificadores inválidos o duplicados',
+    }
+  }
+
+  const montoCreditos = idsNormalizados.length
+  let deduccionesAplicadas: DeduccionTiqueteraItem[] = []
+
+  try {
+    // 1. Deducir créditos del usuario en la tabla de tiqueteras/planes
+    const deduccion = await tiquetesService.deducirCreditos(userId, montoCreditos)
+
+    if (!deduccion.success) {
+      return {
+        success: false,
+        data: null,
+        error: deduccion.error || 'No fue posible deducir los créditos requeridos',
+      }
+    }
+
+    deduccionesAplicadas = deduccion.deducciones
+
+    // 2. Llamar a la RPC transaccional `public.crear_reservas_lote` en Supabase
+    const rpcCall = supabase.rpc as unknown as (
+      fn: string,
+      args: {
+        p_class_ids: string[]
+        p_usuario_id: string
+        p_asignar_automatica: boolean
+      }
+    ) => Promise<{ data: unknown; error: { message: string } | null }>
+
+    const { error: rpcError } = await rpcCall('crear_reservas_lote', {
+      p_class_ids: idsNormalizados,
+      p_usuario_id: userId,
+      p_asignar_automatica: asignacionAutomatica,
+    })
+
+    if (rpcError) {
+      // Rollback compensatorio: restaurar créditos deducidos ante fallo de la RPC
+      await tiquetesService.reembolsarCreditos(userId, montoCreditos, null, deduccionesAplicadas)
+      return {
+        success: false,
+        data: null,
+        error: rpcError.message || 'Error al procesar el lote de reservas en base de datos',
+      }
+    }
+
+    return {
+      success: true,
+      data: {
+        userId,
+        claseIds: idsNormalizados,
+        asignacionAutomatica,
+        totalReservadas: idsNormalizados.length,
+        creditosDeducidos: montoCreditos,
+        creditosRestantes: deduccion.creditosRestantes,
+      },
+      error: null,
+    }
+  } catch (err) {
+    if (deduccionesAplicadas.length > 0) {
+      await tiquetesService.reembolsarCreditos(userId, montoCreditos, null, deduccionesAplicadas)
+    }
+    const message =
+      err instanceof Error ? err.message : 'Error inesperado al crear las reservas en lote'
+    return {
+      success: false,
+      data: null,
+      error: message,
+    }
+  }
+}
+
+/**
+ * Cancela rápidamente una reserva eliminándola (o ejecutando la RPC transaccional
+ * `cancelar_reserva_segura` como respaldo si RLS restringe el borrado directo)
+ * y reembolsando los créditos correspondientes al usuario de forma atómica.
+ */
+export async function cancelarReservaRapida(
+  reservaId: string,
+  userId: string
+): Promise<CancelarReservaRapidaResponse> {
+  if (!reservaId || !reservaId.trim() || !userId || !userId.trim()) {
+    return {
+      success: false,
+      reservaId: reservaId || '',
+      eliminada: false,
+      creditosReembolsados: 0,
+      nuevoSaldo: null,
+      mensaje: 'Parámetros inválidos',
+      error: 'Tanto reservaId como userId son obligatorios',
+    }
+  }
+
+  try {
+    // 1. Verificar existencia, titularidad y estado actual de la reserva
+    const { data: reserva, error: fetchError } = await supabase
+      .from('reservas')
+      .select('*')
+      .eq('id', reservaId)
+      .maybeSingle()
+
+    if (fetchError) {
+      return {
+        success: false,
+        reservaId,
+        eliminada: false,
+        creditosReembolsados: 0,
+        nuevoSaldo: null,
+        mensaje: 'Error al consultar la reserva',
+        error: fetchError.message,
+      }
+    }
+
+    if (!reserva) {
+      return {
+        success: false,
+        reservaId,
+        eliminada: false,
+        creditosReembolsados: 0,
+        nuevoSaldo: null,
+        mensaje: 'Reserva no encontrada',
+        error: 'La reserva especificada no existe',
+      }
+    }
+
+    if (reserva.cliente_id && reserva.cliente_id !== userId) {
+      return {
+        success: false,
+        reservaId,
+        eliminada: false,
+        creditosReembolsados: 0,
+        nuevoSaldo: null,
+        mensaje: 'Permiso denegado',
+        error: 'No tienes permisos para cancelar esta reserva',
+      }
+    }
+
+    if (reserva.estado === 'finalizada' || reserva.estado === 'cancelada') {
+      return {
+        success: false,
+        reservaId,
+        eliminada: false,
+        creditosReembolsados: 0,
+        nuevoSaldo: null,
+        mensaje: 'La reserva no puede ser cancelada',
+        error: `No es posible cancelar una reserva en estado '${reserva.estado}'`,
+      }
+    }
+
+    // 2. Intentar eliminar la reserva directamente validando el propietario
+    const { data: reservaEliminada, error: deleteError } = await supabase
+      .from('reservas')
+      .delete()
+      .eq('id', reservaId)
+      .eq('cliente_id', userId)
+      .select()
+      .maybeSingle()
+
+    if (!deleteError && reservaEliminada) {
+      // 3. Reembolsar los créditos correspondientes
+      const reembolso = await tiquetesService.reembolsarCreditos(
+        userId,
+        1,
+        reservaEliminada.tiquetera_id
+      )
+
+      if (!reembolso.success) {
+        // Compensación atómica: restaurar la reserva eliminada si falla el reembolso
+        await supabase.from('reservas').insert(reservaEliminada)
+
+        return {
+          success: false,
+          reservaId,
+          eliminada: false,
+          creditosReembolsados: 0,
+          nuevoSaldo: null,
+          mensaje: 'No se pudo completar el reembolso de créditos',
+          error:
+            reembolso.error ||
+            'Error al reembolsar créditos; se revirtió la eliminación de la reserva',
+        }
+      }
+
+      return {
+        success: true,
+        reservaId,
+        eliminada: true,
+        creditosReembolsados: reembolso.creditosReembolsados,
+        nuevoSaldo: reembolso.nuevoSaldo,
+        mensaje: 'Reserva eliminada y crédito reembolsado exitosamente',
+        error: null,
+      }
+    }
+
+    // Respaldo atómico vía RPC transaccional si las políticas RLS restringen DELETE directo
+    const { data: rpcData, error: rpcError } = await supabase.rpc('cancelar_reserva_segura', {
+      p_reserva_id: reservaId,
+      p_cliente_id: userId,
+    })
+
+    if (rpcError) {
+      return {
+        success: false,
+        reservaId,
+        eliminada: false,
+        creditosReembolsados: 0,
+        nuevoSaldo: null,
+        mensaje: 'Error al cancelar la reserva',
+        error: deleteError?.message || rpcError.message,
+      }
+    }
+
+    const rpcResponse = rpcData as unknown as CancelarReservaSeguraResponse
+    if (!rpcResponse.success) {
+      return {
+        success: false,
+        reservaId,
+        eliminada: false,
+        creditosReembolsados: 0,
+        nuevoSaldo: rpcResponse.nuevo_saldo ?? null,
+        mensaje: rpcResponse.mensaje || 'No se pudo cancelar la reserva',
+        error: rpcResponse.error || rpcResponse.mensaje || 'Cancelación rechazada',
+      }
+    }
+
+    let creditosReembolsados = rpcResponse.creditos_reintegrados ? 1 : 0
+    let nuevoSaldo: number | null = rpcResponse.nuevo_saldo ?? null
+
+    if (!rpcResponse.creditos_reintegrados) {
+      const reembolso = await tiquetesService.reembolsarCreditos(userId, 1, reserva.tiquetera_id)
+      if (reembolso.success) {
+        creditosReembolsados = reembolso.creditosReembolsados
+        nuevoSaldo = reembolso.nuevoSaldo
+      }
+    }
+
+    return {
+      success: true,
+      reservaId,
+      eliminada: false,
+      creditosReembolsados,
+      nuevoSaldo,
+      mensaje: rpcResponse.mensaje || 'Reserva cancelada y crédito reembolsado exitosamente',
+      error: null,
+    }
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'Error inesperado al cancelar la reserva rápida'
+    return {
+      success: false,
+      reservaId,
+      eliminada: false,
+      creditosReembolsados: 0,
+      nuevoSaldo: null,
+      mensaje: 'Error al cancelar la reserva',
+      error: message,
+    }
+  }
+}
+
 /**
  * Servicio para Creación, Consulta y Cancelación de Reservas
  */
@@ -128,6 +781,16 @@ export const reservasService = {
       }
     }
   },
+
+  /**
+   * Crea múltiples reservas semanales en lote con deducción atómica de créditos.
+   */
+  crearReservasLote,
+
+  /**
+   * Cancela rápidamente una reserva eliminándola y reembolsando los créditos correspondientes.
+   */
+  cancelarReservaRapida,
 
   /**
    * Consulta las reservas de un cliente determinado (próximas o históricas)

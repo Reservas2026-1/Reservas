@@ -106,9 +106,14 @@ const BrandingContext = createContext<BrandingContextType | undefined>(undefined
 export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [studioName, setStudioName] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('rtc_studio_name') || 'VELO-X Cycling Studio'
+      const saved = localStorage.getItem('rtc_studio_name')
+      if (!saved || saved === 'Revolution Indoor Cycle' || saved === 'VELO-X Cycling Studio') {
+        localStorage.setItem('rtc_studio_name', 'RuedaPro')
+        return 'RuedaPro'
+      }
+      return saved
     }
-    return 'VELO-X Cycling Studio'
+    return 'RuedaPro'
   })
 
   const [paletteId, setPaletteId] = useState(() => {
@@ -127,9 +132,9 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [logoUrl, setLogoUrlState] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('rtc_logo_url') || null
+      return localStorage.getItem('rtc_logo_url') || '/logo-ruedapro.png'
     }
-    return null
+    return '/logo-ruedapro.png'
   })
 
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -159,14 +164,14 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     return {
       id: 'e1000000-0000-0000-0000-000000000001',
-      nombre: 'Studio Cycling Bogotá',
-      slug: 'studio-cycling-bogota',
-      logo_url: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=200&auto=format&fit=crop&q=80',
+      nombre: 'RuedaPro',
+      slug: 'ruedapro',
+      logo_url: '/logo-ruedapro.png',
       color_primario: '#DC2626',
       color_secundario: '#991B1B',
       direccion: 'Calle 85 # 12-40, Zona Rosa, Bogotá',
       telefono: '+57 310 123 4567',
-      email: 'contacto@studiocycling.co',
+      email: 'contacto@ruedapro.co',
       capacidad_sala: 15,
       activo: true,
     }

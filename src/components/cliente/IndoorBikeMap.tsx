@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useId } from 'react'
+import React, { useState, useEffect, useId, useMemo } from 'react'
 import {
   Bike,
   Calendar,
+  CalendarDays,
   CheckCircle2,
   AlertTriangle,
   User,
@@ -14,13 +15,21 @@ import {
   Clock4,
   LogOut,
   Info,
+  Sun,
+  Moon,
+  Minus,
+  Plus,
+  X,
+  RotateCcw,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { QRCode } from '@/components/ui/qr-code'
 import { useBranding } from '@/context/BrandingContext'
+import { toast } from '@/components/ui/use-toast'
 import { clasesService, type ClaseConOcupacion, type BicicletaOcupacion } from '@/services/clasesService'
 import { reservasService, type CrearReservaParams } from '@/services/reservasService'
 import { tiqueterasService, type TiqueteraConPlan } from '@/services/tiqueterasService'
@@ -33,168 +42,69 @@ interface IndoorBikeMapProps {
   onVolverAlDashboard?: () => void
 }
 
-// Fallback de clases de muestra si la base de datos aún no tiene registros
-const fallbackClases: ClaseConOcupacion[] = [
-  {
-    id: 'clase-demo-01',
-    empresa_id: 'emp-velo-001',
-    instructor_id: 'inst-01',
-    titulo: 'Power Cycling & Beats',
-    descripcion: 'Sesión de alta intensidad con intervalos de ritmo, sprints y escalada.',
-    fecha: new Date().toISOString().split('T')[0],
-    hora_inicio: '07:00:00',
-    hora_fin: '07:50:00',
-    capacidad: 15,
-    estado: 'programada',
-    created_at: new Date().toISOString(),
-    updated_at: null,
-    instructor: {
-      id: 'inst-01',
-      empresa_id: 'emp-velo-001',
-      email: 'camila@estudiocycling.com',
-      nombre_completo: 'Camila Rossi',
-      documento: null,
-      telefono: null,
-      rol: 'instructor',
-      avatar_url: null,
-      activo: true,
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-    capacidadTotal: 15,
-    cuposOcupados: 4,
-    cuposDisponibles: 11,
-    porcentajeOcupacion: 27,
-    bicicletasReservadasIds: ['bici-03', 'bici-07', 'bici-10', 'bici-14'],
-  },
-  {
-    id: 'clase-demo-02',
-    empresa_id: 'emp-velo-001',
-    instructor_id: 'inst-02',
-    titulo: 'Rhythm & Glow Ride',
-    descripcion: 'Rodada al ritmo de la música con luces neón y trabajo de core.',
-    fecha: new Date().toISOString().split('T')[0],
-    hora_inicio: '18:30:00',
-    hora_fin: '19:20:00',
-    capacidad: 15,
-    estado: 'programada',
-    created_at: new Date().toISOString(),
-    updated_at: null,
-    instructor: {
-      id: 'inst-02',
-      empresa_id: 'emp-velo-001',
-      email: 'diego@estudiocycling.com',
-      nombre_completo: 'Diego Morales',
-      documento: null,
-      telefono: null,
-      rol: 'instructor',
-      avatar_url: null,
-      activo: true,
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-    capacidadTotal: 15,
-    cuposOcupados: 7,
-    cuposDisponibles: 8,
-    porcentajeOcupacion: 47,
-    bicicletasReservadasIds: ['bici-01', 'bici-02', 'bici-05', 'bici-08', 'bici-09', 'bici-11', 'bici-15'],
-  },
-  {
-    id: 'clase-demo-03',
-    empresa_id: 'emp-velo-001',
-    instructor_id: 'inst-01',
-    titulo: 'Endurance Pro Climb',
-    descripcion: 'Entrenamiento de resistencia cardiovascular y fuerza en cuestas pronunciadas.',
-    fecha: new Date().toISOString().split('T')[0],
-    hora_inicio: '19:45:00',
-    hora_fin: '20:35:00',
-    capacidad: 15,
-    estado: 'programada',
-    created_at: new Date().toISOString(),
-    updated_at: null,
-    instructor: {
-      id: 'inst-01',
-      empresa_id: 'emp-velo-001',
-      email: 'camila@estudiocycling.com',
-      nombre_completo: 'Camila Rossi',
-      documento: null,
-      telefono: null,
-      rol: 'instructor',
-      avatar_url: null,
-      activo: true,
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-    capacidadTotal: 15,
-    cuposOcupados: 2,
-    cuposDisponibles: 13,
-    porcentajeOcupacion: 13,
-    bicicletasReservadasIds: ['bici-06', 'bici-12'],
-  },
-  {
-    id: 'clase-demo-04-llena',
-    empresa_id: 'emp-velo-001',
-    instructor_id: 'inst-02',
-    titulo: 'Night Beats VIP (15/15 Cupos Llenos)',
-    descripcion: 'Sesión exclusiva con cupos completamente agotados. Diseñada para probar la lista de espera.',
-    fecha: new Date().toISOString().split('T')[0],
-    hora_inicio: '20:45:00',
-    hora_fin: '21:35:00',
-    capacidad: 15,
-    estado: 'programada',
-    created_at: new Date().toISOString(),
-    updated_at: null,
-    instructor: {
-      id: 'inst-02',
-      empresa_id: 'emp-velo-001',
-      email: 'diego@estudiocycling.com',
-      nombre_completo: 'Diego Morales',
-      documento: null,
-      telefono: null,
-      rol: 'instructor',
-      avatar_url: null,
-      activo: true,
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-    capacidadTotal: 15,
-    cuposOcupados: 15,
-    cuposDisponibles: 0,
-    porcentajeOcupacion: 100,
-    bicicletasReservadasIds: Array.from({ length: 15 }, (_, i) => `bici-${String(i + 1).padStart(2, '0')}`),
-  },
-]
+type TurnoFiltro = 'todas' | 'manana' | 'noche'
 
-// 15 Bicicletas estándar de Indoor Cycling dispuestas en 3 filas de 5 columnas
-const fallbackBicicletas: BicicletaOcupacion[] = Array.from({ length: 15 }, (_, i) => {
-  const numero = i + 1
-  const fila = Math.floor(i / 5) + 1
-  const columna = (i % 5) + 1
-  const id = `bici-${String(numero).padStart(2, '0')}`
-  const estaOcupada = numero === 3 || numero === 7 || numero === 10 || numero === 14
+interface DiaSemanaInfo {
+  fecha: string
+  diaNombre: string
+  diaCorto: string
+  etiquetaFecha: string
+}
 
-  return {
-    id,
-    empresa_id: 'emp-velo-001',
-    numero,
-    codigo: `IC-${String(numero).padStart(2, '0')}`,
-    modelo: 'Stages SC3 Smart Bike',
-    fila,
-    columna,
-    tipo: 'indoor',
-    estado: estaOcupada ? 'reservada' : 'disponible',
-    latitud: null,
-    longitud: null,
-    bateria_porcentaje: 90 - ((numero * 3) % 25),
-    tarifa_hora: null,
-    activo: true,
-    created_at: new Date().toISOString(),
-    updated_at: null,
-    ocupada: estaOcupada,
-    reservaId: estaOcupada ? `mock-res-${numero}` : null,
-    clienteNombre: estaOcupada ? (numero % 2 === 0 ? 'Mateo S.' : 'Sofia R.') : null,
-  }
-})
+interface BloqueHorarioSemanal {
+  id: string
+  fecha: string
+  diaNombre: string
+  diaCorto: string
+  etiquetaFecha: string
+  turno: 'manana' | 'noche'
+  horaInicio: string
+  horaFin: string
+  titulo: string
+  instructorNombre: string
+  cuposDisponibles: number
+  cuposOcupados: number
+  capacidadTotal: number
+  claseRef?: ClaseConOcupacion
+}
+
+const DIAS_SEMANA_NOMBRES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+const DIAS_SEMANA_CORTOS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+
+function formatDateIso(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function getSemanaDeFecha(fechaIso: string): DiaSemanaInfo[] {
+  const parsed = new Date(`${fechaIso}T12:00:00`)
+  const baseDate = Number.isNaN(parsed.getTime()) ? new Date() : parsed
+  const dayOfWeek = baseDate.getDay() // 0 = domingo, 1 = lunes ... 6 = sábado
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
+
+  const monday = new Date(baseDate)
+  monday.setDate(baseDate.getDate() + diffToMonday)
+
+  return Array.from({ length: 7 }, (_, idx) => {
+    const d = new Date(monday)
+    d.setDate(monday.getDate() + idx)
+    const fecha = formatDateIso(d)
+    return {
+      fecha,
+      diaNombre: DIAS_SEMANA_NOMBRES[idx],
+      diaCorto: DIAS_SEMANA_CORTOS[idx],
+      etiquetaFecha: `${String(d.getDate()).padStart(2, '0')} ${MESES_CORTOS[d.getMonth()]}`,
+    }
+  })
+}
+
+function esTurnoManana(horaInicio: string): boolean {
+  const hora = Number.parseInt(horaInicio.slice(0, 2), 10)
+  return Number.isNaN(hora) ? true : hora < 12
+}
 
 export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
   currentUser,
@@ -204,6 +114,7 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
   const { currentPalette, empresaId, studioName } = useBranding()
   const confirmClassId = useId()
   const confirmBikeId = useId()
+  const cantidadReservasId = useId()
 
   const [fechaSeleccionada, setFechaSeleccionada] = useState<string>(
     () => new Date().toISOString().split('T')[0]
@@ -214,12 +125,21 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
   const [selectedBici, setSelectedBici] = useState<BicicletaOcupacion | null>(null)
   const [tiqueteraActiva, setTiqueteraActiva] = useState<TiqueteraConPlan | null>(null)
 
+  // Planificación semanal, cantidad de reservas (1..7) y filtro rápido Mañana/Noche
+  const [cantidadReservas, setCantidadReservas] = useState<number>(1)
+  const [filtroTurno, setFiltroTurno] = useState<TurnoFiltro>('todas')
+  const [clasesSemana, setClasesSemana] = useState<ClaseConOcupacion[]>([])
+  const [loadingSemana, setLoadingSemana] = useState<boolean>(false)
+  const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([])
+  const [slotLimitWarning, setSlotLimitWarning] = useState<string | null>(null)
+
   // Estados de carga y modales
   const [loadingClases, setLoadingClases] = useState(false)
   const [loadingBicis, setLoadingBicis] = useState(false)
   const [bookingInProgress, setBookingInProgress] = useState(false)
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [reservaExitoData, setReservaExitoData] = useState<CrearReservaSeguraResponse | null>(null)
+  const [reservasConfirmadasCount, setReservasConfirmadasCount] = useState<number>(1)
   const [errorReserva, setErrorReserva] = useState<string | null>(null)
 
   // Estados de Lista de Espera (Waitlist)
@@ -241,6 +161,11 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
   const [telefono, setTelefono] = useState(currentUser?.telefono || '3001234567')
   const [email, setEmail] = useState(currentUser?.email || 'alejandro@ejemplo.com')
 
+  // Días Lunes a Domingo de la semana de `fechaSeleccionada`
+  const semanaDias = useMemo(() => getSemanaDeFecha(fechaSeleccionada), [fechaSeleccionada])
+  const lunesSemana = semanaDias[0]?.fecha || fechaSeleccionada
+  const domingoSemana = semanaDias[6]?.fecha || fechaSeleccionada
+
   // 1. Cargar clases del día para la empresa activa
   useEffect(() => {
     let isMounted = true
@@ -249,19 +174,29 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
       try {
         const res = await clasesService.getClasesByFecha(empresaId, fechaSeleccionada)
         if (isMounted) {
-          if (res.data && res.data.length > 0) {
-            setClases(res.data)
-            setClaseSeleccionada(res.data[0])
+          if (res.error) {
+            toast({
+              variant: 'destructive',
+              title: 'Error cargando sesiones',
+              description: res.error,
+            })
+            setClases([])
+            setClaseSeleccionada(null)
           } else {
-            // Usar fallback demostrativo para experiencia inmediata
-            setClases(fallbackClases)
-            setClaseSeleccionada(fallbackClases[0])
+            const lista = res.data || []
+            setClases(lista)
+            setClaseSeleccionada(lista.length > 0 ? lista[0] : null)
           }
         }
-      } catch {
+      } catch (err) {
         if (isMounted) {
-          setClases(fallbackClases)
-          setClaseSeleccionada(fallbackClases[0])
+          toast({
+            variant: 'destructive',
+            title: 'Error de conexión',
+            description: err instanceof Error ? err.message : 'No se pudieron consultar las clases',
+          })
+          setClases([])
+          setClaseSeleccionada(null)
         }
       } finally {
         if (isMounted) setLoadingClases(false)
@@ -273,6 +208,120 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
       isMounted = false
     }
   }, [empresaId, fechaSeleccionada])
+
+  // 1b. Cargar clases de toda la semana (Lunes a Domingo) para la grilla semanal
+  useEffect(() => {
+    let isMounted = true
+    const cargarSemana = async () => {
+      setLoadingSemana(true)
+      try {
+        const res = await clasesService.getClasesByRangoFechas(empresaId, lunesSemana, domingoSemana)
+        if (isMounted) {
+          if (res.error) {
+            toast({
+              variant: 'destructive',
+              title: 'Error cargando grilla semanal',
+              description: res.error,
+            })
+            setClasesSemana([])
+          } else {
+            setClasesSemana(res.data || [])
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setClasesSemana([])
+        }
+      } finally {
+        if (isMounted) setLoadingSemana(false)
+      }
+    }
+
+    cargarSemana()
+    return () => {
+      isMounted = false
+    }
+  }, [empresaId, lunesSemana, domingoSemana])
+
+  // Construir grilla semanal Lunes a Domingo con franjas de Mañana y Noche reales
+  const bloquesSemanales = useMemo<BloqueHorarioSemanal[]>(() => {
+    const lista: BloqueHorarioSemanal[] = []
+
+    semanaDias.forEach((dia) => {
+      const clasesDia = clasesSemana.filter((c) => c.fecha === dia.fecha)
+      const clasesManana = clasesDia.filter((c) => esTurnoManana(c.hora_inicio))
+      const clasesNoche = clasesDia.filter((c) => !esTurnoManana(c.hora_inicio))
+
+      clasesManana.forEach((clase) => {
+        lista.push({
+          id: `slot-${dia.fecha}-am-${clase.id}`,
+          fecha: dia.fecha,
+          diaNombre: dia.diaNombre,
+          diaCorto: dia.diaCorto,
+          etiquetaFecha: dia.etiquetaFecha,
+          turno: 'manana',
+          horaInicio: clase.hora_inicio.slice(0, 5),
+          horaFin: clase.hora_fin.slice(0, 5),
+          titulo: clase.titulo,
+          instructorNombre: clase.instructor?.nombre_completo || 'Coach del Estudio',
+          cuposDisponibles: clase.cuposDisponibles,
+          cuposOcupados: clase.cuposOcupados,
+          capacidadTotal: clase.capacidadTotal,
+          claseRef: clase,
+        })
+      })
+
+      clasesNoche.forEach((clase) => {
+        lista.push({
+          id: `slot-${dia.fecha}-pm-${clase.id}`,
+          fecha: dia.fecha,
+          diaNombre: dia.diaNombre,
+          diaCorto: dia.diaCorto,
+          etiquetaFecha: dia.etiquetaFecha,
+          turno: 'noche',
+          horaInicio: clase.hora_inicio.slice(0, 5),
+          horaFin: clase.hora_fin.slice(0, 5),
+          titulo: clase.titulo,
+          instructorNombre: clase.instructor?.nombre_completo || 'Coach del Estudio',
+          cuposDisponibles: clase.cuposDisponibles,
+          cuposOcupados: clase.cuposOcupados,
+          capacidadTotal: clase.capacidadTotal,
+          claseRef: clase,
+        })
+      })
+    })
+
+    return lista
+  }, [semanaDias, clasesSemana])
+
+  const selectedBloques = useMemo(
+    () =>
+      selectedSlotIds
+        .map((id) => bloquesSemanales.find((b) => b.id === id))
+        .filter((b): b is BloqueHorarioSemanal => Boolean(b)),
+    [selectedSlotIds, bloquesSemanales]
+  )
+
+  const clasesFiltradas = useMemo(() => {
+    if (filtroTurno === 'todas') return clases
+    return clases.filter((c) =>
+      filtroTurno === 'manana' ? esTurnoManana(c.hora_inicio) : !esTurnoManana(c.hora_inicio)
+    )
+  }, [clases, filtroTurno])
+
+  // Mantener claseSeleccionada sincronizada al cambiar el filtro rápido
+  const handleChangeFiltroTurno = (nuevoFiltro: TurnoFiltro) => {
+    setFiltroTurno(nuevoFiltro)
+    const filtradas =
+      nuevoFiltro === 'todas'
+        ? clases
+        : clases.filter((c) =>
+            nuevoFiltro === 'manana' ? esTurnoManana(c.hora_inicio) : !esTurnoManana(c.hora_inicio)
+          )
+    if (filtradas.length > 0 && (!claseSeleccionada || !filtradas.some((c) => c.id === claseSeleccionada.id))) {
+      setClaseSeleccionada(filtradas[0])
+    }
+  }
 
   // 2. Cargar tiquetera activa del cliente para saber sus créditos
   useEffect(() => {
@@ -294,29 +343,35 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
   useEffect(() => {
     let isMounted = true
     const cargarBicicletas = async () => {
-      if (!claseSeleccionada) return
+      if (!claseSeleccionada) {
+        if (isMounted) setBicicletas([])
+        return
+      }
       setLoadingBicis(true)
       setSelectedBici(null)
 
       try {
         const res = await clasesService.getBicicletasParaClase(claseSeleccionada.id, empresaId)
         if (isMounted) {
-          if (res.data && res.data.length > 0) {
-            setBicicletas(res.data)
+          if (res.error) {
+            toast({
+              variant: 'destructive',
+              title: 'Error cargando bicicletas',
+              description: res.error,
+            })
+            setBicicletas([])
           } else {
-            // Mapear con base en las ocupadas de la clase seleccionada
-            const ocupadas = claseSeleccionada.bicicletasReservadasIds || []
-            const bicisCalculadas = fallbackBicicletas.map((b) => ({
-              ...b,
-              ocupada: ocupadas.includes(b.id),
-              estado: ocupadas.includes(b.id) ? ('reservada' as const) : ('disponible' as const),
-            }))
-            setBicicletas(bicisCalculadas)
+            setBicicletas(res.data || [])
           }
         }
-      } catch {
+      } catch (err) {
         if (isMounted) {
-          setBicicletas(fallbackBicicletas)
+          toast({
+            variant: 'destructive',
+            title: 'Error de conexión',
+            description: err instanceof Error ? err.message : 'No se pudieron consultar las bicicletas',
+          })
+          setBicicletas([])
         }
       } finally {
         if (isMounted) setLoadingBicis(false)
@@ -356,6 +411,53 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
       isMounted = false
     }
   }, [claseSeleccionada, currentUser?.id])
+
+  // Manejar cambio en "Cantidad de reservas" (1 a 7)
+  const handleChangeCantidadReservas = (nextRaw: number) => {
+    const clamped = Math.min(7, Math.max(1, Number.isNaN(nextRaw) ? 1 : Math.round(nextRaw)))
+    setCantidadReservas(clamped)
+    setSlotLimitWarning(null)
+    setSelectedSlotIds((prev) => (prev.length > clamped ? prev.slice(0, clamped) : prev))
+  }
+
+  // Manejar click en un bloque de la grilla semanal (seleccionar / deseleccionar)
+  const handleToggleBloqueSemanal = (bloque: BloqueHorarioSemanal) => {
+    if (bloque.cuposDisponibles === 0) return
+
+    const yaSeleccionado = selectedSlotIds.includes(bloque.id)
+
+    if (yaSeleccionado) {
+      setSelectedSlotIds((prev) => prev.filter((id) => id !== bloque.id))
+      setSlotLimitWarning(null)
+      return
+    }
+
+    if (cantidadReservas === 1) {
+      setSelectedSlotIds([bloque.id])
+      setSlotLimitWarning(null)
+    } else if (selectedSlotIds.length < cantidadReservas) {
+      setSelectedSlotIds((prev) => [...prev, bloque.id])
+      setSlotLimitWarning(null)
+    } else {
+      setSlotLimitWarning(
+        `Ya seleccionaste ${cantidadReservas} bloques. Haz clic en un bloque marcado para deseleccionarlo o aumenta la cantidad.`
+      )
+      return
+    }
+
+    // Sincronizar la vista del día y la clase activa con el bloque recién elegido
+    if (bloque.fecha !== fechaSeleccionada) {
+      setFechaSeleccionada(bloque.fecha)
+    }
+    if (bloque.claseRef) {
+      setClaseSeleccionada(bloque.claseRef)
+    }
+  }
+
+  const handleLimpiarSeleccionSemanal = () => {
+    setSelectedSlotIds([])
+    setSlotLimitWarning(null)
+  }
 
   // Puestos libres y cálculo de si la clase está al 100% (15 de 15 ocupadas)
   const puestosLibres = bicicletas.filter((b) => !b.ocupada && b.estado === 'disponible').length
@@ -443,46 +545,72 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
     setBookingInProgress(true)
     setErrorReserva(null)
 
+    const bloquesAConfirmar =
+      selectedBloques.length > 0
+        ? selectedBloques
+        : [
+            {
+              id: claseSeleccionada.id,
+              fecha: claseSeleccionada.fecha,
+              diaNombre: '',
+              diaCorto: '',
+              etiquetaFecha: '',
+              turno: esTurnoManana(claseSeleccionada.hora_inicio) ? ('manana' as const) : ('noche' as const),
+              horaInicio: claseSeleccionada.hora_inicio.slice(0, 5),
+              horaFin: claseSeleccionada.hora_fin.slice(0, 5),
+              titulo: claseSeleccionada.titulo,
+              instructorNombre: claseSeleccionada.instructor?.nombre_completo || 'Coach Master',
+              cuposDisponibles: claseSeleccionada.cuposDisponibles,
+              cuposOcupados: claseSeleccionada.cuposOcupados,
+              capacidadTotal: claseSeleccionada.capacidadTotal,
+              claseRef: claseSeleccionada,
+            },
+          ]
+
     try {
-      const params: CrearReservaParams = {
-        empresaId,
-        claseId: claseSeleccionada.id,
-        bicicletaId: selectedBici.id,
-        clienteId: currentUser?.id || null,
-        clienteNombre: nombre.trim(),
-        clienteDocumento: documento.trim(),
-        clienteTelefono: telefono.trim(),
-        clienteEmail: email.trim() || null,
-        tiqueteraId: tiqueteraActiva?.id || null,
-      }
-
-      const res = await reservasService.crearReserva(params)
-
       let respuestaExitosa: CrearReservaSeguraResponse | null = null
 
-      if (!res.success) {
-        // Si falló por ser entorno demo o falta de supabase table, estructurar respuesta demo
-        if (res.error?.includes('placeholder') || res.error?.includes('fetch') || !res.data) {
-          respuestaExitosa = {
-            success: true,
-            reserva_id: `res-demo-${Date.now()}`,
-            codigo_qr: `CYCLING-PASS-${selectedBici.numero}-${Date.now().toString().slice(-6)}`,
-            bicicleta_numero: selectedBici.numero,
-            creditos_restantes: tiqueteraActiva ? Math.max(0, tiqueteraActiva.creditos_disponibles - 1) : 4,
-            mensaje: `¡Reserva confirmada con éxito para la Bici #${selectedBici.numero}!`,
-          }
-        } else {
-          setErrorReserva(res.error || 'No fue posible completar la reserva')
+      for (const bloque of bloquesAConfirmar) {
+        const claseTarget = bloque.claseRef || claseSeleccionada
+        const params: CrearReservaParams = {
+          empresaId,
+          claseId: claseTarget.id,
+          bicicletaId: selectedBici.id,
+          clienteId: currentUser?.id || null,
+          clienteNombre: nombre.trim(),
+          clienteDocumento: documento.trim(),
+          clienteTelefono: telefono.trim(),
+          clienteEmail: email.trim() || null,
+          tiqueteraId: tiqueteraActiva?.id || null,
+        }
+
+        const res = await reservasService.crearReserva(params)
+
+        if (!res.success || !res.data) {
+          const msg = res.error || 'No fue posible completar la reserva en la base de datos'
+          setErrorReserva(msg)
+          toast({
+            variant: 'destructive',
+            title: 'Error en reserva',
+            description: msg,
+          })
           setBookingInProgress(false)
           return
         }
-      } else if (res.data) {
+
         respuestaExitosa = res.data
       }
 
       if (respuestaExitosa) {
+        setReservasConfirmadasCount(bloquesAConfirmar.length)
         setReservaExitoData(respuestaExitosa)
         setShowConfirmModal(false)
+
+        toast({
+          variant: 'success',
+          title: '¡Reserva confirmada!',
+          description: `Bicicleta #${selectedBici.numero} apartada correctamente.`,
+        })
 
         // Actualizar bicicleta localmente
         setBicicletas((prev) =>
@@ -525,6 +653,9 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
   const fila2 = bicicletas.filter((b) => b.fila === 2)
   const fila3 = bicicletas.filter((b) => b.fila === 3)
 
+  const mostrarManana = filtroTurno === 'todas' || filtroTurno === 'manana'
+  const mostrarNoche = filtroTurno === 'todas' || filtroTurno === 'noche'
+
   return (
     <div className="space-y-6 pb-12">
       {/* Encabezado y Selector de Fecha */}
@@ -539,7 +670,7 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground">
-            Selecciona tu horario y elige tu puesto frente a la tarima del instructor.
+            Elige la cantidad de reservas semanales, filtra por turno Mañana o Noche y aparta tu bicicleta.
           </p>
         </div>
 
@@ -563,22 +694,375 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
         </div>
       </div>
 
-      {/* 1. Selector Horizontal de Horarios / Clases */}
+      {/* 0. Planificador Semanal: Cantidad de reservas (1-7), Filtro Mañana/Noche y Grilla Lunes-Domingo */}
+      <Card className="border-border/80 shadow-sm overflow-hidden">
+        <CardHeader className="p-4 sm:p-5 border-b bg-card space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <CalendarDays className={`w-5 h-5 ${currentPalette.textClass}`} />
+                Planificador Semanal de Horarios (Lunes a Domingo)
+              </CardTitle>
+              <CardDescription className="text-xs mt-0.5">
+                Selecciona entre 1 y 7 bloques en la semana del {semanaDias[0]?.etiquetaFecha} al{' '}
+                {semanaDias[6]?.etiquetaFecha}. Haz clic para seleccionar o deseleccionar.
+              </CardDescription>
+            </div>
+
+            <div className="flex flex-wrap items-end gap-4">
+              {/* Selector numérico: Cantidad de reservas (1 a 7) */}
+              <div className="space-y-1.5">
+                <Label htmlFor={cantidadReservasId} className="text-xs font-semibold text-muted-foreground">
+                  Cantidad de reservas
+                </Label>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => handleChangeCantidadReservas(cantidadReservas - 1)}
+                    disabled={cantidadReservas <= 1}
+                    aria-label="Disminuir cantidad de reservas"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </Button>
+                  <Input
+                    id={cantidadReservasId}
+                    type="number"
+                    min={1}
+                    max={7}
+                    value={cantidadReservas}
+                    onChange={(e) => handleChangeCantidadReservas(Number(e.target.value))}
+                    className="h-8 w-16 text-center font-bold text-sm px-1"
+                    aria-label="Cantidad de reservas"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => handleChangeCantidadReservas(cantidadReservas + 1)}
+                    disabled={cantidadReservas >= 7}
+                    aria-label="Aumentar cantidad de reservas"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </Button>
+                  <Badge variant="outline" className="text-[11px] font-mono ml-1">
+                    {cantidadReservas} / 7 máx.
+                  </Badge>
+                </div>
+              </div>
+
+              {/* Filtro rápido con botones Mañana (Azul) y Noche (Púrpura) */}
+              <div className="space-y-1.5">
+                <span className="block text-xs font-semibold text-muted-foreground">
+                  Filtro rápido de franja
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={filtroTurno === 'todas' ? 'default' : 'outline'}
+                    onClick={() => handleChangeFiltroTurno('todas')}
+                    className="h-8 text-xs font-semibold"
+                  >
+                    Todas
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleChangeFiltroTurno(filtroTurno === 'manana' ? 'todas' : 'manana')}
+                    aria-pressed={filtroTurno === 'manana'}
+                    className={`h-8 text-xs font-bold gap-1.5 transition-all ${
+                      filtroTurno === 'manana'
+                        ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-sm'
+                        : 'border-blue-300 bg-blue-50/70 text-blue-700 hover:bg-blue-100 hover:text-blue-800 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/50'
+                    }`}
+                  >
+                    <Sun className="w-3.5 h-3.5" />
+                    <span>Mañana</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleChangeFiltroTurno(filtroTurno === 'noche' ? 'todas' : 'noche')}
+                    aria-pressed={filtroTurno === 'noche'}
+                    className={`h-8 text-xs font-bold gap-1.5 transition-all ${
+                      filtroTurno === 'noche'
+                        ? 'bg-purple-600 hover:bg-purple-700 text-white border-purple-600 shadow-sm'
+                        : 'border-purple-300 bg-purple-50/70 text-purple-700 hover:bg-purple-100 hover:text-purple-800 dark:border-purple-800 dark:bg-purple-950/30 dark:text-purple-300 dark:hover:bg-purple-900/50'
+                    }`}
+                  >
+                    <Moon className="w-3.5 h-3.5" />
+                    <span>Noche</span>
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Barra de progreso visual que refleja la cantidad seleccionada */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-foreground">
+                Bloques elegidos: {selectedSlotIds.length} de {cantidadReservas}
+              </span>
+              <div className="flex items-center gap-1" aria-label="Indicador de reservas seleccionadas">
+                {Array.from({ length: cantidadReservas }, (_, idx) => {
+                  const filled = idx < selectedSlotIds.length
+                  return (
+                    <span
+                      key={idx}
+                      className={`h-2.5 w-6 rounded-full transition-all ${
+                        filled ? currentPalette.bgClass : 'bg-muted border border-border'
+                      }`}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+
+            {selectedSlotIds.length > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleLimpiarSeleccionSemanal}
+                className="h-7 text-xs text-muted-foreground hover:text-destructive gap-1 self-start sm:self-auto"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Limpiar selección</span>
+              </Button>
+            )}
+          </div>
+
+          {slotLimitWarning && (
+            <div className="p-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{slotLimitWarning}</span>
+            </div>
+          )}
+        </CardHeader>
+
+        <CardContent className="p-4 sm:p-5">
+          {loadingSemana ? (
+            <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground py-8">
+              <Loader2 className="w-4 h-4 animate-spin text-primary" />
+              <span>Cargando grilla semanal de horarios...</span>
+            </div>
+          ) : (
+            <div className="overflow-x-auto pb-1">
+              <div className="min-w-[780px] space-y-3">
+                {/* Encabezado días Lunes a Domingo */}
+                <div className="grid grid-cols-8 gap-2 text-center">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center justify-center">
+                    Franja
+                  </div>
+                  {semanaDias.map((dia) => {
+                    const esDiaActivo = dia.fecha === fechaSeleccionada
+                    return (
+                      <div
+                        key={dia.fecha}
+                        className={`rounded-lg py-1.5 px-2 border text-xs ${
+                          esDiaActivo
+                            ? 'bg-primary/10 border-primary/40 text-foreground font-bold'
+                            : 'bg-muted/40 border-border/60 text-muted-foreground'
+                        }`}
+                      >
+                        <div className="font-bold">{dia.diaNombre}</div>
+                        <div className="text-[10px] font-mono">{dia.etiquetaFecha}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Fila Franja Mañana (Azul) */}
+                {mostrarManana && (
+                  <div className="grid grid-cols-8 gap-2 items-stretch">
+                    <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/30 p-2 flex flex-col items-center justify-center text-center gap-1">
+                      <Sun className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                      <span className="text-xs font-bold text-blue-700 dark:text-blue-300">Mañana</span>
+                      <span className="text-[10px] text-blue-600/80 dark:text-blue-400/80 font-mono">AM</span>
+                    </div>
+
+                    {semanaDias.map((dia) => {
+                      const bloquesDia = bloquesSemanales.filter(
+                        (b) => b.fecha === dia.fecha && b.turno === 'manana'
+                      )
+                      return (
+                        <div key={`${dia.fecha}-am`} className="space-y-1.5">
+                          {bloquesDia.map((bloque) => {
+                            const orderIdx = selectedSlotIds.indexOf(bloque.id)
+                            const isSelected = orderIdx !== -1
+                            const sinCupos = bloque.cuposDisponibles === 0
+
+                            return (
+                              <button
+                                key={bloque.id}
+                                type="button"
+                                disabled={sinCupos}
+                                onClick={() => handleToggleBloqueSemanal(bloque)}
+                                aria-pressed={isSelected}
+                                className={`w-full h-full min-h-[82px] rounded-xl border p-2 text-left transition-all flex flex-col justify-between cursor-pointer ${
+                                  sinCupos
+                                    ? 'bg-muted/50 border-border/50 opacity-55 cursor-not-allowed'
+                                    : isSelected
+                                    ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-400 shadow-md'
+                                    : 'bg-blue-50/40 hover:bg-blue-100/70 border-blue-200 text-foreground dark:bg-blue-950/20 dark:hover:bg-blue-900/40 dark:border-blue-900'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-1">
+                                  <span
+                                    className={`text-[10px] font-mono font-bold ${
+                                      isSelected ? 'text-blue-100' : 'text-blue-700 dark:text-blue-300'
+                                    }`}
+                                  >
+                                    {bloque.horaInicio}
+                                  </span>
+                                  {isSelected ? (
+                                    <Badge className="bg-white text-blue-700 text-[9px] px-1.5 py-0 font-black">
+                                      #{orderIdx + 1} ×
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                      {sinCupos ? 'Lleno' : `${bloque.cuposDisponibles} lib.`}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] font-bold leading-tight line-clamp-2 my-1">
+                                  {bloque.titulo}
+                                </div>
+                                <div
+                                  className={`text-[9px] truncate ${
+                                    isSelected ? 'text-blue-100' : 'text-muted-foreground'
+                                  }`}
+                                >
+                                  {isSelected ? 'Clic para deseleccionar' : bloque.instructorNombre}
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Fila Franja Noche (Púrpura) */}
+                {mostrarNoche && (
+                  <div className="grid grid-cols-8 gap-2 items-stretch">
+                    <div className="rounded-xl border border-purple-200 dark:border-purple-900 bg-purple-50/70 dark:bg-purple-950/30 p-2 flex flex-col items-center justify-center text-center gap-1">
+                      <Moon className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                      <span className="text-xs font-bold text-purple-700 dark:text-purple-300">Noche</span>
+                      <span className="text-[10px] text-purple-600/80 dark:text-purple-400/80 font-mono">PM</span>
+                    </div>
+
+                    {semanaDias.map((dia) => {
+                      const bloquesDia = bloquesSemanales.filter(
+                        (b) => b.fecha === dia.fecha && b.turno === 'noche'
+                      )
+                      return (
+                        <div key={`${dia.fecha}-pm`} className="space-y-1.5">
+                          {bloquesDia.map((bloque) => {
+                            const orderIdx = selectedSlotIds.indexOf(bloque.id)
+                            const isSelected = orderIdx !== -1
+                            const sinCupos = bloque.cuposDisponibles === 0
+
+                            return (
+                              <button
+                                key={bloque.id}
+                                type="button"
+                                disabled={sinCupos}
+                                onClick={() => handleToggleBloqueSemanal(bloque)}
+                                aria-pressed={isSelected}
+                                className={`w-full h-full min-h-[82px] rounded-xl border p-2 text-left transition-all flex flex-col justify-between cursor-pointer ${
+                                  sinCupos
+                                    ? 'bg-muted/50 border-border/50 opacity-55 cursor-not-allowed'
+                                    : isSelected
+                                    ? 'bg-purple-600 text-white border-purple-600 ring-2 ring-purple-400 shadow-md'
+                                    : 'bg-purple-50/40 hover:bg-purple-100/70 border-purple-200 text-foreground dark:bg-purple-950/20 dark:hover:bg-purple-900/40 dark:border-purple-900'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-1">
+                                  <span
+                                    className={`text-[10px] font-mono font-bold ${
+                                      isSelected ? 'text-purple-100' : 'text-purple-700 dark:text-purple-300'
+                                    }`}
+                                  >
+                                    {bloque.horaInicio}
+                                  </span>
+                                  {isSelected ? (
+                                    <Badge className="bg-white text-purple-700 text-[9px] px-1.5 py-0 font-black">
+                                      #{orderIdx + 1} ×
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                      {sinCupos ? 'Lleno' : `${bloque.cuposDisponibles} lib.`}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] font-bold leading-tight line-clamp-2 my-1">
+                                  {bloque.titulo}
+                                </div>
+                                <div
+                                  className={`text-[9px] truncate ${
+                                    isSelected ? 'text-purple-100' : 'text-muted-foreground'
+                                  }`}
+                                >
+                                  {isSelected ? 'Clic para deseleccionar' : bloque.instructorNombre}
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 1. Selector Horizontal de Horarios / Clases del día */}
       <div className="space-y-2">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
-          Clases Disponibles — {fechaSeleccionada}
-        </span>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
+            Clases Disponibles — {fechaSeleccionada}
+          </span>
+          {filtroTurno !== 'todas' && (
+            <Badge
+              variant="outline"
+              className={`text-[10px] font-bold ${
+                filtroTurno === 'manana'
+                  ? 'border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-300'
+                  : 'border-purple-500/40 bg-purple-500/10 text-purple-700 dark:text-purple-300'
+              }`}
+            >
+              Filtro activo: {filtroTurno === 'manana' ? 'Mañana' : 'Noche'}
+            </Badge>
+          )}
+        </div>
 
         {loadingClases ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground py-4">
             <Loader2 className="w-4 h-4 animate-spin text-primary" />
             <span>Cargando clases del día...</span>
           </div>
+        ) : clasesFiltradas.length === 0 ? (
+          <div className="p-4 rounded-xl border border-dashed text-xs text-muted-foreground text-center">
+            No hay clases programadas en la franja seleccionada para este día.
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-            {clases.map((clase) => {
+            {clasesFiltradas.map((clase) => {
               const isSelected = claseSeleccionada?.id === clase.id
               const esLlena = clase.cuposDisponibles === 0
+              const esAM = esTurnoManana(clase.hora_inicio)
 
               return (
                 <div
@@ -596,9 +1080,18 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="font-bold text-sm text-foreground">{clase.titulo}</span>
-                    <Badge variant={isSelected ? 'default' : 'outline'} className="text-[10px] font-mono">
+                  <div className="flex items-center justify-between mb-1.5 gap-1">
+                    <span className="font-bold text-sm text-foreground truncate">{clase.titulo}</span>
+                    <Badge
+                      variant={isSelected ? 'default' : 'outline'}
+                      className={`text-[10px] font-mono shrink-0 ${
+                        !isSelected
+                          ? esAM
+                            ? 'border-blue-400/50 text-blue-700 dark:text-blue-300'
+                            : 'border-purple-400/50 text-purple-700 dark:text-purple-300'
+                          : ''
+                      }`}
+                    >
                       {clase.hora_inicio.slice(0, 5)}
                     </Badge>
                   </div>
@@ -942,6 +1435,49 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                 </div>
               )}
 
+              {/* Bloques Semanales Seleccionados */}
+              {selectedBloques.length > 0 && (
+                <div className="p-3 bg-muted/30 rounded-lg border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-foreground text-xs">
+                      Bloques Semanales ({selectedBloques.length}/{cantidadReservas})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleLimpiarSeleccionSemanal}
+                      className="text-[10px] text-muted-foreground hover:text-destructive font-semibold"
+                    >
+                      Quitar todos
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedBloques.map((b) => (
+                      <Badge
+                        key={b.id}
+                        variant="outline"
+                        className={`text-[10px] gap-1 pr-1 ${
+                          b.turno === 'manana'
+                            ? 'border-blue-400/50 bg-blue-500/10 text-blue-700 dark:text-blue-300'
+                            : 'border-purple-400/50 bg-purple-500/10 text-purple-700 dark:text-purple-300'
+                        }`}
+                      >
+                        <span>
+                          {b.diaCorto} {b.horaInicio}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleBloqueSemanal(b)}
+                          aria-label={`Deseleccionar ${b.diaNombre} ${b.horaInicio}`}
+                          className="rounded-full hover:bg-black/10 dark:hover:bg-white/10 p-0.5"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Datos de la Clase Seleccionada */}
               {claseSeleccionada && (
                 <div className="p-3 bg-muted/40 rounded-lg border space-y-1.5">
@@ -960,7 +1496,11 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                   </div>
                   <div className="text-muted-foreground text-[11px] flex justify-between">
                     <span>Consumo de Créditos:</span>
-                    <span className="font-bold text-emerald-600">1 Crédito</span>
+                    <span className="font-bold text-emerald-600">
+                      {selectedBloques.length > 1
+                        ? `${selectedBloques.length} Créditos`
+                        : '1 Crédito'}
+                    </span>
                   </div>
                 </div>
               )}
@@ -973,7 +1513,11 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                   onClick={handleAbrirConfirmacion}
                   className={`w-full font-bold shadow-md ${currentPalette.bgClass} text-white hover:opacity-90`}
                 >
-                  <span>Confirmar Reserva de Bici</span>
+                  <span>
+                    {selectedBloques.length > 1
+                      ? `Confirmar ${selectedBloques.length} Reservas`
+                      : 'Confirmar Reserva de Bici'}
+                  </span>
                   <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
               )}
@@ -1026,13 +1570,33 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                   </div>
                   <div>
                     <label htmlFor={confirmClassId} className="text-[10px] text-muted-foreground block">
-                      Clase
+                      {selectedBloques.length > 1 ? 'Reservas semanales' : 'Clase'}
                     </label>
                     <span id={confirmClassId} className="font-bold text-xs truncate block">
-                      {claseSeleccionada.titulo}
+                      {selectedBloques.length > 1
+                        ? `${selectedBloques.length} horarios seleccionados`
+                        : claseSeleccionada.titulo}
                     </span>
                   </div>
                 </div>
+
+                {selectedBloques.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedBloques.map((b) => (
+                      <Badge
+                        key={b.id}
+                        variant="outline"
+                        className={`text-[10px] ${
+                          b.turno === 'manana'
+                            ? 'border-blue-400/50 text-blue-700 dark:text-blue-300'
+                            : 'border-purple-400/50 text-purple-700 dark:text-purple-300'
+                        }`}
+                      >
+                        {b.diaCorto} {b.etiquetaFecha} • {b.horaInicio}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
 
                 {/* Formulario con datos del ciclista */}
                 <div className="space-y-2">
@@ -1088,7 +1652,11 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
 
                 <div className="p-2.5 rounded-lg border bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[11px] flex items-center justify-between">
                   <span>Saldo a descontar:</span>
-                  <span className="font-bold">1 Crédito de Tiquetera</span>
+                  <span className="font-bold">
+                    {selectedBloques.length > 1
+                      ? `${selectedBloques.length} Créditos de Tiquetera`
+                      : '1 Crédito de Tiquetera'}
+                  </span>
                 </div>
               </CardContent>
 
@@ -1172,7 +1740,11 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-2">
                 <CheckCircle2 className="w-7 h-7" />
               </div>
-              <h3 className="text-lg font-black tracking-tight">¡PUESTO RESERVADO CON ÉXITO!</h3>
+              <h3 className="text-lg font-black tracking-tight">
+                {reservasConfirmadasCount > 1
+                  ? `¡${reservasConfirmadasCount} RESERVAS CONFIRMADAS!`
+                  : '¡PUESTO RESERVADO CON ÉXITO!'}
+              </h3>
               <p className="text-xs text-white/90">
                 Tu puesto #{reservaExitoData.bicicleta_numero} está garantizado.
               </p>

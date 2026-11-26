@@ -50,56 +50,12 @@ export interface ServiceResponse<T> {
   error: string | null
 }
 
-// Fallback de estudios SaaS para resiliencia offline / demo
-const ESTUDIOS_MOCK_FALLBACK: EstudioActivo[] = [
-  {
-    id: 'e1000000-0000-0000-0000-000000000001',
-    nombre: 'Studio Cycling Bogotá',
-    slug: 'studio-cycling-bogota',
-    logo_url: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=200&auto=format&fit=crop&q=80',
-    color_primario: '#DC2626',
-    color_secundario: '#991B1B',
-    direccion: 'Calle 85 # 12-40, Zona Rosa, Bogotá',
-    telefono: '+57 310 123 4567',
-    email: 'contacto@studiocycling.co',
-    capacidad_sala: 15,
-    activo: true,
-  },
-  {
-    id: 'e2000000-0000-0000-0000-000000000002',
-    nombre: 'Power Spin Medellín',
-    slug: 'power-spin-medellin',
-    logo_url: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=200&auto=format&fit=crop&q=80',
-    color_primario: '#2563EB',
-    color_secundario: '#1E40AF',
-    direccion: 'Cra 43A # 5A-113, El Poblado, Medellín',
-    telefono: '+57 300 987 6543',
-    email: 'info@powerspin.co',
-    capacidad_sala: 15,
-    activo: true,
-  },
-  {
-    id: 'e3000000-0000-0000-0000-000000000003',
-    nombre: 'Veloce Indoor Cali',
-    slug: 'veloce-indoor-cali',
-    logo_url: 'https://images.unsplash.com/photo-1540497077202-7c8a3999166f?w=200&auto=format&fit=crop&q=80',
-    color_primario: '#16A34A',
-    color_secundario: '#166534',
-    direccion: 'Av. 9N # 15-22, Granada, Cali',
-    telefono: '+57 320 555 1234',
-    email: 'cali@veloceindoor.com',
-    capacidad_sala: 15,
-    activo: true,
-  },
-]
-
 /**
  * Servicio SaaS para administración de Sedes, Marca Blanca y Logos de Estudios
  */
 export const empresasService = {
   /**
-   * Lista todos los estudios/gimnasios activos en la plataforma SaaS.
-   * Cuenta con fallback a catálogo base si no hay conexión o no hay registros.
+   * Lista todos los estudios/gimnasios activos en la plataforma SaaS desde Supabase.
    */
   async getEstudiosActivos(): Promise<ServiceResponse<EstudioActivo[]>> {
     try {
@@ -110,55 +66,76 @@ export const empresasService = {
         .order('nombre', { ascending: true })
 
       if (error) {
-        console.warn('[empresasService] No se pudo consultar Supabase, usando catálogo fallback:', error.message)
-        return { data: ESTUDIOS_MOCK_FALLBACK, error: null }
+        return { data: null, error: error.message }
       }
 
-      if (!data || data.length === 0) {
-        return { data: ESTUDIOS_MOCK_FALLBACK, error: null }
-      }
-
-      return { data: data as EstudioActivo[], error: null }
+      return { data: (data || []) as EstudioActivo[], error: null }
     } catch (err) {
-      console.warn('[empresasService] Error de red consultando estudios:', err)
-      return { data: ESTUDIOS_MOCK_FALLBACK, error: null }
+      const message = err instanceof Error ? err.message : 'Error de red consultando estudios activos'
+      return { data: null, error: message }
     }
   },
 
   /**
    * Obtiene la configuración de un estudio a partir de su slug único (ej: "studio-cycling-bogota").
-   * Si no se encuentra en Supabase, recurre al catálogo de respaldo por slug.
    */
   async getEstudioBySlug(slug: string): Promise<ServiceResponse<EstudioActivo>> {
     try {
       const cleanSlug = slug.trim().toLowerCase()
-      const { data, error } = await supabase
-        .from('empresas')
-        .select('*')
-        .eq('slug', cleanSlug)
-        .eq('activo', true)
-        .single()
-
-      if (error || !data) {
-        const fallback = ESTUDIOS_MOCK_FALLBACK.find(
-          (e) => e.slug?.toLowerCase() === cleanSlug
-        ) || {
-          ...ESTUDIOS_MOCK_FALLBACK[0],
-          slug: cleanSlug,
-          nombre: cleanSlug
-            .split('-')
-            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-            .join(' '),
-        }
-
-        return { data: fallback, error: null }
+      if (!cleanSlug) {
+        return { data: null, error: 'El slug del estudio es obligatorio' }
       }
 
-      return { data: data as unknown as EstudioActivo, error: null }
-    } catch {
-      const cleanSlug = slug.trim().toLowerCase()
-      const fallback = ESTUDIOS_MOCK_FALLBACK.find((e) => e.slug?.toLowerCase() === cleanSlug) || ESTUDIOS_MOCK_FALLBACK[0]
-      return { data: fallback, error: null }
+      const { data, error } = await supabase
+        .from('empresas')
+        .select('id, nombre, slug, logo_url, color_primario, color_secundario, direccion, telefono, email, capacidad_sala, activo')
+        .eq('slug', cleanSlug)
+        .eq('activo', true)
+        .maybeSingle()
+
+      if (error) {
+        return { data: null, error: error.message }
+      }
+
+      if (!data) {
+        return { data: null, error: 'Estudio no encontrado' }
+      }
+
+      return { data: data as EstudioActivo, error: null }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error inesperado al consultar el estudio por slug'
+      return { data: null, error: message }
+    }
+  },
+
+  /**
+   * Obtiene un estudio por su ID único desde Supabase.
+   */
+  async getEstudioById(empresaId: string): Promise<ServiceResponse<EstudioActivo>> {
+    try {
+      const idLimpio = empresaId.trim()
+      if (!idLimpio) {
+        return { data: null, error: 'El identificador del estudio es obligatorio' }
+      }
+
+      const { data, error } = await supabase
+        .from('empresas')
+        .select('id, nombre, slug, logo_url, color_primario, color_secundario, direccion, telefono, email, capacidad_sala, activo')
+        .eq('id', idLimpio)
+        .maybeSingle()
+
+      if (error) {
+        return { data: null, error: error.message }
+      }
+
+      if (!data) {
+        return { data: null, error: 'Estudio no encontrado' }
+      }
+
+      return { data: data as EstudioActivo, error: null }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error inesperado al consultar el estudio'
+      return { data: null, error: message }
     }
   },
 

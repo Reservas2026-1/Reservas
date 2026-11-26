@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import {
   CheckCircle2,
   XCircle,
@@ -10,228 +10,199 @@ import {
   AlertCircle,
   RefreshCw,
   ShieldCheck,
+  Filter,
+  History,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { toast } from '@/components/ui/use-toast'
 import { useBranding } from '@/context/BrandingContext'
 import { pagosService, type PagoPendienteDetallado } from '@/services/pagosService'
+import {
+  adminService,
+  type PagoFiltradoDetallado,
+  type PagosFiltros,
+} from '@/services/adminService'
+import type { EstadoPago, MetodoPago } from '@/types/database'
 
-// Fallback de demostración con montos en COP y métodos colombianos
-const fallbackPagosPendientes: Partial<PagoPendienteDetallado>[] = [
-  {
-    id: 'pay-001',
-    empresa_id: 'emp-velo-001',
-    cliente_id: 'usr-001',
-    plan_id: 'plan-pack10',
-    monto: 290000,
-    metodo: 'nequi',
-    estado: 'pendiente',
-    referencia_transaccion: 'NEQUI-8849201',
-    comprobante_url: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&q=80',
-    fecha_pago: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-    cliente: {
-      id: 'usr-001',
-      empresa_id: 'emp-velo-001',
-      nombre_completo: 'Valentina Restrepo',
-      documento: '1098765432',
-      telefono: '3123456789',
-      email: 'valentina@ejemplo.com',
-      rol: 'cliente',
-      avatar_url: null,
-      activo: true,
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-    plan: {
-      id: 'plan-pack10',
-      empresa_id: 'emp-velo-001',
-      nombre: 'Pack 10 Clases Pro',
-      descripcion: '10 créditos para indoor cycling',
-      precio: 290000,
-      creditos: 10,
-      duracion_horas: 1,
-      dias_vigencia: 60,
-      activo: true,
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-  },
-  {
-    id: 'pay-002',
-    empresa_id: 'emp-velo-001',
-    cliente_id: 'usr-002',
-    plan_id: 'plan-pack5',
-    monto: 160000,
-    metodo: 'bancolombia',
-    estado: 'pendiente',
-    referencia_transaccion: 'BC-99482019',
-    comprobante_url: 'https://images.unsplash.com/photo-1554224154-26032ffc0d07?w=600&q=80',
-    fecha_pago: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-    cliente: {
-      id: 'usr-002',
-      empresa_id: 'emp-velo-001',
-      nombre_completo: 'Mateo Gómez',
-      documento: '1020304050',
-      telefono: '3159876543',
-      email: 'mateo@ejemplo.com',
-      rol: 'cliente',
-      avatar_url: null,
-      activo: true,
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-    plan: {
-      id: 'plan-pack5',
-      empresa_id: 'emp-velo-001',
-      nombre: 'Pack 5 Clases Rider',
-      descripcion: '5 créditos de cycling',
-      precio: 160000,
-      creditos: 5,
-      duracion_horas: 1,
-      dias_vigencia: 30,
-      activo: true,
-      created_at: new Date().toISOString(),
-      updated_at: null,
-    },
-  },
-]
+interface PaymentValidationProps {
+  adminId?: string
+}
 
-export const PaymentValidation: React.FC = () => {
+export const PaymentValidation: React.FC<PaymentValidationProps> = ({
+  adminId = 'usr-admin-01',
+}) => {
   const { currentPalette, empresaId } = useBranding()
 
-  // Estados de datos
+  const [tab, setTab] = useState<'pendientes' | 'historial'>('pendientes')
+
+  // Pendientes
   const [pagos, setPagos] = useState<PagoPendienteDetallado[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [refreshing, setRefreshing] = useState<boolean>(false)
   const [busqueda, setBusqueda] = useState<string>('')
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // Modal comprobante
+  // Historial filtrado
+  const [historial, setHistorial] = useState<PagoFiltradoDetallado[]>([])
+  const [loadingHistorial, setLoadingHistorial] = useState<boolean>(false)
+  const [filtros, setFiltros] = useState<PagosFiltros>({
+    fechaInicio: '',
+    fechaFin: '',
+    metodo: 'todos',
+    estado: 'todos',
+    codigo: '',
+  })
+
+  // Modales
   const [comprobanteModalUrl, setComprobanteModalUrl] = useState<string | null>(null)
-
-  // Modal rechazo
   const [pagoParaRechazar, setPagoParaRechazar] = useState<PagoPendienteDetallado | null>(null)
   const [motivoRechazo, setMotivoRechazo] = useState<string>('')
-  const [accionLoading, setAccionLoading] = useState<boolean>(false)
+  const [procesandoId, setProcesandoId] = useState<string | null>(null)
 
-  // Feedback banner
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; mensaje: string } | null>(
     null
   )
 
-  const adminId = 'usr-admin-01'
-
-  // Cargar pagos pendientes
-  const cargarPagos = async () => {
-    try {
-      const res = await pagosService.getPagosPendientes(empresaId)
-      if (res.data && res.data.length > 0) {
-        setPagos(res.data)
-      } else {
-        setPagos(fallbackPagosPendientes as PagoPendienteDetallado[])
-      }
-    } catch (err) {
-      console.warn('Error al cargar pagos pendientes, usando fallback:', err)
-      setPagos(fallbackPagosPendientes as PagoPendienteDetallado[])
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
-    }
-  }
-
-  useEffect(() => {
-    cargarPagos()
-  }, [empresaId])
-
-  const handleManualRefresh = () => {
-    setRefreshing(true)
-    cargarPagos()
-  }
-
-  // Formato COP
-  const formatCOP = (valor: number) => {
-    return new Intl.NumberFormat('es-CO', {
+  const formatCOP = (valor: number) =>
+    new Intl.NumberFormat('es-CO', {
       style: 'currency',
       currency: 'COP',
       maximumFractionDigits: 0,
     }).format(valor)
+
+  const cargarPagosPendientes = useCallback(async () => {
+    setErrorMsg(null)
+    try {
+      const res = await pagosService.getPagosPendientes(empresaId)
+      if (res.error) {
+        setErrorMsg(res.error)
+        toast({
+          variant: 'destructive',
+          title: 'Error cargando pagos pendientes',
+          description: res.error,
+        })
+        setPagos([])
+      } else {
+        setPagos(res.data || [])
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error inesperado al consultar pagos'
+      setErrorMsg(msg)
+      toast({ variant: 'destructive', title: 'Error', description: msg })
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [empresaId])
+
+  const cargarHistorialFiltrado = useCallback(async () => {
+    setLoadingHistorial(true)
+    setErrorMsg(null)
+    try {
+      const res = await adminService.getPagosFiltrados(empresaId, filtros)
+      if (res.error) {
+        setErrorMsg(res.error)
+        toast({
+          variant: 'destructive',
+          title: 'Error cargando historial de pagos',
+          description: res.error,
+        })
+        setHistorial([])
+      } else {
+        setHistorial(res.data || [])
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al consultar historial'
+      setErrorMsg(msg)
+      toast({ variant: 'destructive', title: 'Error', description: msg })
+    } finally {
+      setLoadingHistorial(false)
+    }
+  }, [empresaId, filtros])
+
+  useEffect(() => {
+    setLoading(true)
+    cargarPagosPendientes()
+  }, [cargarPagosPendientes])
+
+  useEffect(() => {
+    if (tab === 'historial') {
+      cargarHistorialFiltrado()
+    }
+  }, [tab, cargarHistorialFiltrado])
+
+  const handleManualRefresh = () => {
+    setRefreshing(true)
+    if (tab === 'pendientes') {
+      cargarPagosPendientes()
+    } else {
+      cargarHistorialFiltrado().finally(() => setRefreshing(false))
+    }
   }
 
-  // Aprobar pago
   const handleAprobarPago = async (pago: PagoPendienteDetallado) => {
-    setAccionLoading(true)
+    setProcesandoId(pago.id)
     setFeedback(null)
 
     try {
       const res = await pagosService.aprobarPago(pago.id, adminId)
       if (res.success) {
         setPagos((prev) => prev.filter((p) => p.id !== pago.id))
-        setFeedback({
-          type: 'success',
-          mensaje: `Pago de ${pago.cliente?.nombre_completo || 'cliente'} por ${formatCOP(
+        const msg =
+          res.mensaje ||
+          `Pago de ${pago.cliente?.nombre_completo || 'cliente'} por ${formatCOP(
             pago.monto
-          )} aprobado exitosamente. Tiquetera acreditada y movimiento asentado en caja.`,
-        })
+          )} aprobado. Tiquetera acreditada y movimiento asentado en caja.`
+        setFeedback({ type: 'success', mensaje: msg })
+        toast({ variant: 'success', title: 'Pago aprobado', description: msg })
       } else {
-        // En modo demostración si no conecta a BD
-        setPagos((prev) => prev.filter((p) => p.id !== pago.id))
-        setFeedback({
-          type: 'success',
-          mensaje: `Pago de ${pago.cliente?.nombre_completo || 'cliente'} por ${formatCOP(
-            pago.monto
-          )} aprobado en la sesión de prueba.`,
-        })
+        const msg = res.error || res.mensaje || 'No se pudo aprobar el pago.'
+        setFeedback({ type: 'error', mensaje: msg })
+        toast({ variant: 'destructive', title: 'Error al aprobar pago', description: msg })
       }
     } catch (err) {
-      console.error('Error al aprobar pago:', err)
-      setFeedback({
-        type: 'error',
-        mensaje: 'Error inesperado al procesar la aprobación del pago.',
-      })
+      const msg = err instanceof Error ? err.message : 'Error inesperado al aprobar el pago.'
+      setFeedback({ type: 'error', mensaje: msg })
+      toast({ variant: 'destructive', title: 'Error', description: msg })
     } finally {
-      setAccionLoading(false)
+      setProcesandoId(null)
     }
   }
 
-  // Confirmar rechazo de pago
   const handleConfirmarRechazo = async () => {
     if (!pagoParaRechazar) return
 
-    setAccionLoading(true)
+    setProcesandoId(pagoParaRechazar.id)
     setFeedback(null)
 
     try {
       const res = await pagosService.rechazarPago(pagoParaRechazar.id, adminId, motivoRechazo)
       if (res.success) {
         setPagos((prev) => prev.filter((p) => p.id !== pagoParaRechazar.id))
-        setFeedback({
-          type: 'success',
-          mensaje: `Pago #${pagoParaRechazar.referencia_transaccion || pagoParaRechazar.id} rechazado debidamente.`,
-        })
+        const msg = `Pago #${
+          pagoParaRechazar.referencia_transaccion || pagoParaRechazar.id
+        } rechazado debidamente.`
+        setFeedback({ type: 'success', mensaje: msg })
+        toast({ variant: 'success', title: 'Pago rechazado', description: msg })
+        setPagoParaRechazar(null)
+        setMotivoRechazo('')
       } else {
-        setPagos((prev) => prev.filter((p) => p.id !== pagoParaRechazar.id))
-        setFeedback({
-          type: 'success',
-          mensaje: 'Pago rechazado en la sesión.',
-        })
+        const msg = res.error || 'No se pudo rechazar el pago.'
+        setFeedback({ type: 'error', mensaje: msg })
+        toast({ variant: 'destructive', title: 'Error al rechazar', description: msg })
       }
     } catch (err) {
-      console.error('Error al rechazar pago:', err)
-      setFeedback({
-        type: 'error',
-        mensaje: 'Error al rechazar el pago.',
-      })
+      const msg = err instanceof Error ? err.message : 'Error al rechazar el pago.'
+      setFeedback({ type: 'error', mensaje: msg })
+      toast({ variant: 'destructive', title: 'Error', description: msg })
     } finally {
-      setAccionLoading(false)
-      setPagoParaRechazar(null)
-      setMotivoRechazo('')
+      setProcesandoId(null)
     }
   }
 
-  // Filtrar pagos por búsqueda
   const pagosFiltrados = pagos.filter((p) => {
     const texto = busqueda.toLowerCase()
     return (
@@ -244,43 +215,71 @@ export const PaymentValidation: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Encabezado */}
       <Card className="w-full border-border/80 shadow-sm">
         <CardHeader>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <CardTitle className="text-xl flex items-center gap-2">
                   <CreditCard className={`w-5 h-5 ${currentPalette.textClass}`} />
-                  Bandeja de Validación de Pagos
+                  Validación y Auditoría de Pagos
                 </CardTitle>
                 <Badge variant="destructive" className="text-xs font-mono font-bold">
                   {pagos.length} pendientes
                 </Badge>
               </div>
               <CardDescription className="text-xs mt-1">
-                Verifica comprobantes de transferencias Nequi y Bancolombia para acreditar clases y asentar en caja.
+                Verifica comprobantes Nequi/Bancolombia para acreditar clases o consulta el historial completo.
               </CardDescription>
             </div>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <div className="relative w-full sm:w-64">
-                <Search className="w-4 h-4 absolute left-3 top-2.5 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar alumno o referencia..."
-                  className="pl-9 text-xs"
-                  value={busqueda}
-                  onChange={(e) => setBusqueda(e.target.value)}
-                />
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg border">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={tab === 'pendientes' ? 'default' : 'ghost'}
+                  onClick={() => setTab('pendientes')}
+                  className={`h-7 text-xs font-bold ${
+                    tab === 'pendientes' ? `${currentPalette.bgClass} text-white` : ''
+                  }`}
+                >
+                  Pendientes ({pagos.length})
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={tab === 'historial' ? 'default' : 'ghost'}
+                  onClick={() => setTab('historial')}
+                  className={`h-7 text-xs font-bold gap-1 ${
+                    tab === 'historial' ? `${currentPalette.bgClass} text-white` : ''
+                  }`}
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>Historial</span>
+                </Button>
               </div>
 
+              {tab === 'pendientes' && (
+                <div className="relative w-full sm:w-60">
+                  <Search className="w-4 h-4 absolute left-3 top-2.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar alumno o referencia..."
+                    className="pl-9 text-xs h-9"
+                    value={busqueda}
+                    onChange={(e) => setBusqueda(e.target.value)}
+                  />
+                </div>
+              )}
+
               <Button
+                type="button"
                 variant="outline"
                 size="icon"
                 onClick={handleManualRefresh}
                 disabled={refreshing}
                 className="h-9 w-9 shrink-0"
-                title="Actualizar bandeja"
+                title="Actualizar"
               >
                 <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
               </Button>
@@ -288,7 +287,15 @@ export const PaymentValidation: React.FC = () => {
           </div>
         </CardHeader>
 
-        {/* Feedback alert */}
+        {errorMsg && (
+          <div className="px-6 pb-3">
+            <div className="p-3 rounded-lg border border-destructive/30 bg-destructive/10 text-destructive text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          </div>
+        )}
+
         {feedback && (
           <div className="px-6 pb-2">
             <div
@@ -318,122 +325,260 @@ export const PaymentValidation: React.FC = () => {
         )}
 
         <CardContent>
-          {loading ? (
-            <div className="h-44 flex items-center justify-center">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : pagosFiltrados.length === 0 ? (
-            <div className="p-8 text-center text-xs text-muted-foreground space-y-2">
-              <ShieldCheck className="w-8 h-8 mx-auto text-emerald-500/50" />
-              <p className="font-semibold text-foreground">
-                ¡Bandeja al día! No hay pagos pendientes de validación.
-              </p>
-              <p className="text-[11px]">
-                Todos los comprobantes y transferencias han sido auditados.
-              </p>
-            </div>
-          ) : (
-            <div className="divide-y divide-border">
-              {pagosFiltrados.map((pago) => {
-                const isNequi = pago.metodo === 'nequi'
-                const isBancolombia = pago.metodo === 'bancolombia'
-                const isWompi = pago.metodo === 'wompi'
-
-                return (
-                  <div
-                    key={pago.id}
-                    className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-muted/10 transition-colors"
-                  >
-                    {/* Información del cliente y plan */}
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-black text-sm text-foreground">
-                          {pago.cliente?.nombre_completo || 'Cliente Sin Registrar'}
-                        </span>
-                        <Badge
-                          variant={isNequi ? 'secondary' : isBancolombia ? 'default' : isWompi ? 'outline' : 'outline'}
-                          className="text-[10px] uppercase font-bold"
-                        >
-                          {pago.metodo}
-                        </Badge>
-                        <span className="text-xs font-mono text-muted-foreground">
-                          Ref: #{pago.referencia_transaccion || pago.id.slice(0, 8)}
-                        </span>
-                      </div>
-
-                      <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1">
-                        <span>Plan: <strong className="text-foreground">{pago.plan?.nombre || 'Paquete Clases'}</strong></span>
-                        <span>Doc: {pago.cliente?.documento || 'N/A'}</span>
-                        <span>Tel: {pago.cliente?.telefono || 'N/A'}</span>
-                        <span>
-                          Fecha: {new Date(pago.fecha_pago).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Monto y Botones de Aprobación */}
-                    <div className="flex items-center gap-3 self-end md:self-center shrink-0">
-                      <div className="text-right">
-                        <div className="text-base font-black text-foreground">
-                          {formatCOP(pago.monto)}
+          {tab === 'pendientes' ? (
+            loading ? (
+              <div className="h-44 flex items-center justify-center">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : pagosFiltrados.length === 0 ? (
+              <div className="p-8 text-center text-xs text-muted-foreground space-y-2">
+                <ShieldCheck className="w-8 h-8 mx-auto text-emerald-500/50" />
+                <p className="font-semibold text-foreground">
+                  ¡Bandeja al día! No hay pagos pendientes de validación.
+                </p>
+                <p className="text-[11px]">
+                  Todos los comprobantes y transferencias han sido auditados.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {pagosFiltrados.map((pago) => {
+                  const isProcesando = procesandoId === pago.id
+                  return (
+                    <div
+                      key={pago.id}
+                      className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-muted/10 transition-colors"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-black text-sm text-foreground">
+                            {pago.cliente?.nombre_completo || 'Cliente Sin Registrar'}
+                          </span>
+                          <Badge variant="secondary" className="text-[10px] uppercase font-bold">
+                            {pago.metodo}
+                          </Badge>
+                          <span className="text-xs font-mono text-muted-foreground">
+                            Ref: #{pago.referencia_transaccion || pago.id.slice(0, 8)}
+                          </span>
                         </div>
-                        <span className="text-[10px] text-muted-foreground">
-                          {pago.plan?.creditos ? `${pago.plan.creditos} clases` : 'Créditos'}
-                        </span>
+
+                        <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1">
+                          <span>
+                            Plan:{' '}
+                            <strong className="text-foreground">
+                              {pago.plan?.nombre || 'Paquete Clases'}
+                            </strong>
+                          </span>
+                          <span>Doc: {pago.cliente?.documento || 'N/A'}</span>
+                          <span>Tel: {pago.cliente?.telefono || 'N/A'}</span>
+                          <span>
+                            Fecha:{' '}
+                            {new Date(pago.fecha_pago).toLocaleString('es-CO', {
+                              day: '2-digit',
+                              month: 'short',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
                       </div>
 
-                      {/* Botón Ver Comprobante */}
-                      {pago.comprobante_url ? (
+                      <div className="flex items-center gap-2.5 self-end md:self-center shrink-0 flex-wrap">
+                        <div className="text-right mr-1">
+                          <div className="text-base font-black text-foreground">
+                            {formatCOP(pago.monto)}
+                          </div>
+                          <span className="text-[10px] text-muted-foreground">
+                            {pago.plan?.creditos ? `${pago.plan.creditos} clases` : 'Créditos'}
+                          </span>
+                        </div>
+
+                        {pago.comprobante_url ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setComprobanteModalUrl(pago.comprobante_url || null)}
+                            className="h-8 text-xs gap-1 font-semibold"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Comprobante</span>
+                          </Button>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground italic px-2">
+                            Sin archivo
+                          </span>
+                        )}
+
                         <Button
                           type="button"
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
-                          onClick={() => setComprobanteModalUrl(pago.comprobante_url || null)}
-                          className="h-8 text-xs gap-1 font-semibold"
+                          disabled={isProcesando}
+                          onClick={() => setPagoParaRechazar(pago)}
+                          className="h-8 text-xs text-muted-foreground hover:text-destructive gap-1"
                         >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Comprobante</span>
+                          <XCircle className="w-3.5 h-3.5" />
+                          <span>Rechazar</span>
                         </Button>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground italic px-2">
-                          Sin archivo
-                        </span>
-                      )}
 
-                      {/* Botón Rechazar */}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={accionLoading}
-                        onClick={() => setPagoParaRechazar(pago)}
-                        className="h-8 text-xs text-muted-foreground hover:text-destructive gap-1"
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                        <span>Rechazar</span>
-                      </Button>
-
-                      {/* Botón Aprobar */}
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={accionLoading}
-                        onClick={() => handleAprobarPago(pago)}
-                        className="h-8 text-xs font-bold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Aprobar Pago</span>
-                      </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={isProcesando}
+                          onClick={() => handleAprobarPago(pago)}
+                          className="h-8 text-xs font-bold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                        >
+                          {isProcesando ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>Aprobar Pago</span>
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
+            )
+          ) : (
+            <div className="space-y-4">
+              {/* Filtros del historial */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2 p-3 rounded-xl border bg-muted/20 text-xs">
+                <Input
+                  type="date"
+                  value={filtros.fechaInicio || ''}
+                  onChange={(e) => setFiltros({ ...filtros, fechaInicio: e.target.value })}
+                  title="Fecha inicio"
+                  className="h-8 text-xs"
+                />
+                <Input
+                  type="date"
+                  value={filtros.fechaFin || ''}
+                  onChange={(e) => setFiltros({ ...filtros, fechaFin: e.target.value })}
+                  title="Fecha fin"
+                  className="h-8 text-xs"
+                />
+                <select
+                  value={filtros.metodo || 'todos'}
+                  onChange={(e) =>
+                    setFiltros({ ...filtros, metodo: e.target.value as MetodoPago | 'todos' })
+                  }
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                >
+                  <option value="todos">Todos los métodos</option>
+                  <option value="nequi">Nequi</option>
+                  <option value="bancolombia">Bancolombia</option>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="efectivo">Efectivo</option>
+                  <option value="wompi">Wompi</option>
+                </select>
+                <select
+                  value={filtros.estado || 'todos'}
+                  onChange={(e) =>
+                    setFiltros({ ...filtros, estado: e.target.value as EstadoPago | 'todos' })
+                  }
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                >
+                  <option value="todos">Todos los estados</option>
+                  <option value="aprobado">Aprobado</option>
+                  <option value="pendiente">Pendiente</option>
+                  <option value="rechazado">Rechazado</option>
+                  <option value="reembolsado">Reembolsado</option>
+                </select>
+                <Input
+                  placeholder="Código / Ref / QR..."
+                  value={filtros.codigo || ''}
+                  onChange={(e) => setFiltros({ ...filtros, codigo: e.target.value })}
+                  className="h-8 text-xs"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={cargarHistorialFiltrado}
+                  disabled={loadingHistorial}
+                  className={`h-8 text-xs font-bold gap-1 ${currentPalette.bgClass} text-white`}
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  <span>Filtrar</span>
+                </Button>
+              </div>
+
+              {loadingHistorial ? (
+                <div className="h-44 flex items-center justify-center">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : historial.length === 0 ? (
+                <div className="p-8 text-center text-xs text-muted-foreground">
+                  No hay pagos que coincidan con los filtros seleccionados.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {historial.map((p) => (
+                    <div
+                      key={p.id}
+                      className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-foreground">
+                            {p.cliente?.nombre_completo || 'Cliente'}
+                          </span>
+                          <Badge
+                            variant={
+                              p.estado === 'aprobado'
+                                ? 'success'
+                                : p.estado === 'rechazado'
+                                ? 'destructive'
+                                : 'secondary'
+                            }
+                            className="text-[10px] capitalize"
+                          >
+                            {p.estado}
+                          </Badge>
+                          <Badge variant="outline" className="text-[10px] uppercase">
+                            {p.metodo}
+                          </Badge>
+                          {p.referencia_transaccion && (
+                            <span className="font-mono text-muted-foreground">
+                              #{p.referencia_transaccion}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {p.plan?.nombre || 'Sin plan'} •{' '}
+                          {new Date(p.fecha_pago).toLocaleString('es-CO')}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 self-end sm:self-center">
+                        {p.comprobante_url && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setComprobanteModalUrl(p.comprobante_url || null)}
+                            className="h-7 text-[11px] gap-1"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>Ver</span>
+                          </Button>
+                        )}
+                        <span className="font-black text-sm text-foreground">
+                          {formatCOP(p.monto)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Modal: Visor de Comprobante de Pago */}
+      {/* Modal: Visor de Comprobante */}
       {comprobanteModalUrl && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <Card className="w-full max-w-lg shadow-2xl border-border bg-card overflow-hidden">
@@ -443,9 +588,7 @@ export const PaymentValidation: React.FC = () => {
                   <Eye className="w-4 h-4 text-primary" />
                   Comprobante de Transferencia
                 </CardTitle>
-                <CardDescription className="text-xs">
-                  Captura enviada por el ciclista
-                </CardDescription>
+                <CardDescription className="text-xs">Captura enviada por el ciclista</CardDescription>
               </div>
               <button
                 type="button"
@@ -466,7 +609,7 @@ export const PaymentValidation: React.FC = () => {
               </div>
 
               <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Almacenado de forma segura en Supabase Storage</span>
+                <span>Almacenado en Supabase Storage</span>
                 <a
                   href={comprobanteModalUrl}
                   target="_blank"
@@ -493,7 +636,7 @@ export const PaymentValidation: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Rechazar Pago con Motivo */}
+      {/* Modal: Rechazar Pago */}
       {pagoParaRechazar && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <Card className="w-full max-w-md shadow-2xl border-border bg-card overflow-hidden">
@@ -512,7 +655,7 @@ export const PaymentValidation: React.FC = () => {
                 </button>
               </div>
               <CardDescription className="text-xs">
-                Indica la razón del rechazo para notificar al cliente.
+                Indica la razón del rechazo para registrar en auditoría.
               </CardDescription>
             </CardHeader>
 
@@ -551,11 +694,11 @@ export const PaymentValidation: React.FC = () => {
                 type="button"
                 variant="destructive"
                 size="sm"
-                disabled={accionLoading}
+                disabled={procesandoId === pagoParaRechazar.id}
                 onClick={handleConfirmarRechazo}
                 className="font-bold"
               >
-                {accionLoading ? (
+                {procesandoId === pagoParaRechazar.id ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
                 ) : (
                   'Confirmar Rechazo'
