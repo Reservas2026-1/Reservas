@@ -15,13 +15,14 @@ import {
   Trash2,
   Repeat,
   AlertCircle,
+  LayoutGrid,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/use-toast'
-import { useBranding } from '@/context/BrandingContext'
+import { useBranding, getConfiguracionVertical } from '@/context/BrandingContext'
 import { HybridHourSelector } from '@/components/admin/HybridHourSelector'
 import {
   adminService,
@@ -42,7 +43,10 @@ const DIAS_SEMANA_LABELS = [
 ]
 
 export const CalendarView: React.FC = () => {
-  const { currentPalette, empresaId, studioName } = useBranding()
+  const { currentPalette, empresaId, studioName, estudioActivo } = useBranding()
+  const verticalConfig = getConfiguracionVertical(estudioActivo?.tipo_negocio)
+  const sesionMasculina = ['Turno', 'WOD'].includes(verticalConfig.sesionSingular)
+  const capacidadDefault = estudioActivo?.capacidad_sala || 15
 
   const [vistaTab, setVistaTab] = useState<'clases' | 'horarios_base'>('clases')
 
@@ -175,8 +179,8 @@ export const CalendarView: React.FC = () => {
       fecha: fechaSeleccionada,
       horaInicio: '07:00',
       horaFin: '07:45',
-      descripcion: 'Sesión de alta intensidad y ritmo musical.',
-      capacidad: 15,
+      descripcion: `${verticalConfig.sesionSingular} programada en ${verticalConfig.espacio.toLowerCase()}.`,
+      capacidad: capacidadDefault,
       estado: 'programada',
     })
     setModalClaseOpen(true)
@@ -458,13 +462,19 @@ export const CalendarView: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-2xl font-black tracking-tight">Horarios, Clases y Flota</h1>
+            <h1 className="text-2xl font-black tracking-tight">
+              {verticalConfig.navHorariosLabel} y {verticalConfig.recursoPlural}
+            </h1>
             <Badge variant="secondary" className="text-xs">
               {studioName}
             </Badge>
+            <Badge variant="outline" className="text-xs font-semibold">
+              {verticalConfig.etiquetaNegocio}
+            </Badge>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            CRUD completo de sesiones diarias, horarios base semanales, mapa de 15 bicis y check-in QR.
+            CRUD completo de {verticalConfig.sesionPlural.toLowerCase()} diarias, horarios base semanales, disponibilidad de{' '}
+            {verticalConfig.recursoCortoPlural} y check-in QR.
           </p>
         </div>
 
@@ -480,7 +490,7 @@ export const CalendarView: React.FC = () => {
                 vistaTab === 'clases' ? `${currentPalette.bgClass} text-white` : ''
               }`}
             >
-              Clases del Día
+              {verticalConfig.sesionPlural} del Día
             </Button>
             <Button
               type="button"
@@ -549,7 +559,7 @@ export const CalendarView: React.FC = () => {
                 className={`text-xs font-bold gap-1.5 h-9 ${currentPalette.bgClass} text-white shadow-sm`}
               >
                 <PlusCircle className="w-4 h-4" />
-                <span>Crear Clase</span>
+                <span>Crear {verticalConfig.sesionSingular}</span>
               </Button>
             </>
           ) : (
@@ -662,10 +672,10 @@ export const CalendarView: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-sm font-bold flex items-center gap-2">
                     <CalendarIcon className={`w-4 h-4 ${currentPalette.textClass}`} />
-                    Clases del {fechaSeleccionada}
+                    {verticalConfig.sesionPlural} del {fechaSeleccionada}
                   </CardTitle>
                   <Badge variant="outline" className="text-xs font-mono">
-                    {clases.length} clases
+                    {clases.length} {verticalConfig.sesionPlural.toLowerCase()}
                   </Badge>
                 </div>
               </CardHeader>
@@ -678,7 +688,9 @@ export const CalendarView: React.FC = () => {
                 ) : clases.length === 0 ? (
                   <div className="p-8 text-center text-xs text-muted-foreground space-y-3">
                     <CalendarIcon className="w-8 h-8 mx-auto opacity-30" />
-                    <p>No hay clases programadas para esta fecha.</p>
+                    <p>
+                      No hay {verticalConfig.sesionPlural.toLowerCase()} programad{sesionMasculina ? 'os' : 'as'} para esta fecha.
+                    </p>
                     <Button
                       type="button"
                       size="sm"
@@ -686,7 +698,7 @@ export const CalendarView: React.FC = () => {
                       onClick={abrirModalCrearClase}
                       className="text-xs"
                     >
-                      Programar Clase
+                      Programar {verticalConfig.sesionSingular}
                     </Button>
                   </div>
                 ) : (
@@ -735,7 +747,8 @@ export const CalendarView: React.FC = () => {
 
                             <div className="text-right shrink-0">
                               <div className="text-xs font-bold text-foreground">
-                                {clase.cuposOcupados || 0} / {clase.capacidadTotal || 15} bicis
+                                {clase.cuposOcupados || 0} / {clase.capacidadTotal || capacidadDefault}{' '}
+                                {verticalConfig.recursoCortoPlural}
                               </div>
                               <span className="text-[10px] text-muted-foreground">
                                 {clase.cuposDisponibles || 0} libres
@@ -787,13 +800,17 @@ export const CalendarView: React.FC = () => {
               <CardHeader className="p-4 border-b flex flex-row items-center justify-between">
                 <div>
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Bike className={`w-5 h-5 ${currentPalette.textClass}`} />
-                    Disposición de los 15 Asientos
+                    {verticalConfig.showBicycleMap ? (
+                      <Bike className={`w-5 h-5 ${currentPalette.textClass}`} />
+                    ) : (
+                      <LayoutGrid className={`w-5 h-5 ${currentPalette.textClass}`} />
+                    )}
+                    Disposición de {verticalConfig.recursoPlural}
                   </CardTitle>
                   <CardDescription className="text-xs">
                     {claseActiva
                       ? `${claseActiva.titulo} (${claseActiva.hora_inicio?.slice(0, 5)} hrs)`
-                      : 'Selecciona una clase para visualizar la sala'}
+                      : `Selecciona ${sesionMasculina ? 'un' : 'una'} ${verticalConfig.sesionSingular.toLowerCase()} para visualizar ${verticalConfig.espacio.toLowerCase()}`}
                   </CardDescription>
                 </div>
 
@@ -805,7 +822,11 @@ export const CalendarView: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-1">
                       <span className="w-3 h-3 rounded-full bg-red-600 inline-block" />
-                      <span className="text-muted-foreground">Ocupada</span>
+                      <span className="text-muted-foreground">
+                        {verticalConfig.recursoSingular === 'Bicicleta' || verticalConfig.recursoSingular === 'Cancha' || verticalConfig.recursoSingular === 'Esterilla' || verticalConfig.recursoSingular === 'Estación' || verticalConfig.recursoSingular === 'Cabina'
+                          ? 'Ocupada'
+                          : 'Ocupado'}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -814,13 +835,18 @@ export const CalendarView: React.FC = () => {
               <CardContent className="p-5">
                 {!claseActiva ? (
                   <div className="py-12 text-center text-muted-foreground text-xs">
-                    Selecciona una clase de la izquierda para ver el mapa de las 15 bicis.
+                    Selecciona {sesionMasculina ? 'un' : 'una'} {verticalConfig.sesionSingular.toLowerCase()} de la izquierda para ver la disponibilidad de{' '}
+                    {verticalConfig.recursoCortoPlural}.
                   </div>
                 ) : (
                   <div className="space-y-6">
                     <div className="w-48 mx-auto py-2 rounded-lg bg-muted text-center border font-bold text-xs flex items-center justify-center gap-2 shadow-inner">
                       <User className="w-3.5 h-3.5 text-primary" />
-                      <span>TARIMA DEL COACH</span>
+                      <span>
+                        {verticalConfig.showBicycleMap
+                          ? 'TARIMA DEL COACH'
+                          : `FRENTE DE ${verticalConfig.espacio.toUpperCase()}`}
+                      </span>
                     </div>
 
                     <div className="space-y-3">
@@ -855,11 +881,19 @@ export const CalendarView: React.FC = () => {
                                     )}
                                   </div>
 
-                                  <Bike
-                                    className={`w-5 h-5 my-1 ${
-                                      isOccupied ? 'text-rose-600' : 'text-emerald-600'
-                                    }`}
-                                  />
+                                  {verticalConfig.showBicycleMap ? (
+                                    <Bike
+                                      className={`w-5 h-5 my-1 ${
+                                        isOccupied ? 'text-rose-600' : 'text-emerald-600'
+                                      }`}
+                                    />
+                                  ) : (
+                                    <LayoutGrid
+                                      className={`w-5 h-5 my-1 ${
+                                        isOccupied ? 'text-rose-600' : 'text-emerald-600'
+                                      }`}
+                                    />
+                                  )}
 
                                   <div className="text-[10px] truncate max-w-full font-semibold">
                                     {isOccupied ? (
@@ -886,7 +920,9 @@ export const CalendarView: React.FC = () => {
                     {/* Lista de Alumnos Inscritos */}
                     <div className="border-t pt-4">
                       <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center justify-between">
-                        <span>Alumnos Inscritos ({claseActiva.alumnos?.length || 0})</span>
+                        <span>
+                          {verticalConfig.clientePlural} Inscritos ({claseActiva.alumnos?.length || 0})
+                        </span>
                         <span className="font-normal font-sans text-[11px]">
                           Asistencias:{' '}
                           {claseActiva.alumnos?.filter((a) => a.asistenciaConfirmada).length || 0}
@@ -896,7 +932,8 @@ export const CalendarView: React.FC = () => {
                       <div className="max-h-56 overflow-y-auto divide-y text-xs border rounded-lg">
                         {claseActiva.alumnos?.length === 0 ? (
                           <div className="p-3 text-center text-muted-foreground text-xs">
-                            Aún no hay ciclistas inscritos en esta clase.
+                            Aún no hay {verticalConfig.clientePlural.toLowerCase()} inscritos en esta{' '}
+                            {verticalConfig.sesionSingular.toLowerCase()}.
                           </div>
                         ) : (
                           claseActiva.alumnos?.map((a) => (
@@ -915,7 +952,7 @@ export const CalendarView: React.FC = () => {
 
                               <div className="flex items-center gap-2 shrink-0">
                                 <Badge variant="outline" className="text-[10px] font-mono">
-                                  Bici #{a.bicicletaNumero}
+                                  {verticalConfig.recursoSingular} #{a.bicicletaNumero}
                                 </Badge>
 
                                 {a.asistenciaConfirmada ? (
@@ -961,7 +998,9 @@ export const CalendarView: React.FC = () => {
               <div className="flex justify-between items-center">
                 <CardTitle className="text-base flex items-center gap-2">
                   <CalendarIcon className={`w-4 h-4 ${currentPalette.textClass}`} />
-                  {editingClase ? 'Editar Clase / Horario' : 'Crear Nueva Clase / Horario'}
+                  {editingClase
+                    ? `Editar ${verticalConfig.sesionSingular} / Horario`
+                    : `${sesionMasculina ? 'Nuevo' : 'Nueva'} ${verticalConfig.sesionSingular} / Horario`}
                 </CardTitle>
                 <button
                   type="button"
@@ -983,7 +1022,7 @@ export const CalendarView: React.FC = () => {
                     <label className="font-bold text-foreground">Nombre / Título</label>
                     <Input
                       required
-                      placeholder="Ej: Power Cycling & Beats"
+                      placeholder={`Ej: ${verticalConfig.ejemploSesion}`}
                       value={formDataClase.nombre}
                       onChange={(e) => setFormDataClase({ ...formDataClase, nombre: e.target.value })}
                     />
@@ -1012,7 +1051,9 @@ export const CalendarView: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="font-bold text-foreground">Capacidad (Bicis)</label>
+                    <label className="font-bold text-foreground">
+                      Capacidad ({verticalConfig.recursoPlural})
+                    </label>
                     <Input
                       type="number"
                       min={1}
@@ -1261,19 +1302,21 @@ export const CalendarView: React.FC = () => {
                 </button>
               </div>
               <CardDescription className="text-xs">
-                Ingresa o escanea el código del pase de entrada del ciclista.
+                Ingresa o escanea el código del pase de entrada del {verticalConfig.clienteSingular.toLowerCase()}.
               </CardDescription>
             </CardHeader>
 
             <form onSubmit={handleValidarQR}>
               <CardContent className="p-5 space-y-4 text-xs">
                 <div className="space-y-1.5">
-                  <label className="font-bold text-foreground">Código QR del Ciclista</label>
+                  <label className="font-bold text-foreground">
+                    Código QR del {verticalConfig.clienteSingular}
+                  </label>
                   <div className="flex gap-2">
                     <Input
                       autoFocus
                       required
-                      placeholder="Ej: CYCLING-PASS-BICI04-8849"
+                      placeholder="Ej: RESERLY-PASS-04-8849"
                       value={codigoQrInput}
                       onChange={(e) => setCodigoQrInput(e.target.value)}
                       className="font-mono text-xs"
@@ -1312,9 +1355,11 @@ export const CalendarView: React.FC = () => {
                     <p className="text-[11px]">{resultadoAsistencia.mensaje}</p>
                     {resultadoAsistencia.reserva && (
                       <div className="mt-2 pt-2 border-t text-[11px] font-mono space-y-0.5 text-foreground">
-                        <div>Alumno: {resultadoAsistencia.reserva.cliente_nombre}</div>
                         <div>
-                          Bicicleta #{resultadoAsistencia.reserva.bicicleta?.numero || '?'} (
+                          {verticalConfig.clienteSingular}: {resultadoAsistencia.reserva.cliente_nombre}
+                        </div>
+                        <div>
+                          {verticalConfig.recursoSingular} #{resultadoAsistencia.reserva.bicicleta?.numero || '?'} (
                           {resultadoAsistencia.reserva.bicicleta?.codigo || 'IC'})
                         </div>
                       </div>

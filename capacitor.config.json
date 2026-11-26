@@ -1,5 +1,5 @@
-﻿{
-  "appId": "com.reservas.indoorcycling",
-  "appName": "Reservas Studio",
-  "webDir": "dist"
+{
+    "appId": "com.reservas.indoorcycling",
+    "appName": "Reservas Studio",
+    "webDir": "dist"
 }

@@ -1,9 +1,14 @@
 import { useState, type ReactNode } from 'react'
 import { Menu, LogOut, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { BrandingToolbar } from '@/components/ui/branding-toolbar'
 import { useBranding } from '@/context/BrandingContext'
 import type { Tables } from '@/types/database'
+
+function capitalizeLabel(value: string): string {
+  if (!value) return ''
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
 
 export type SidebarNavSection = {
   title: string
@@ -39,12 +44,18 @@ export default function SidebarLayout({
 }: SidebarLayoutProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [desktopCollapsed, setDesktopCollapsed] = useState(false)
-  const { studioName, currentPalette, logoUrl } = useBranding()
+  const { studioName, currentPalette, logoUrl, estudioActivo, verticalConfig } = useBranding()
+  const mapNavLabel = `Mapa de ${capitalizeLabel(verticalConfig.recursoCortoPlural)}`
 
-  const activeItemLabel =
-    sections
-      .flatMap((s) => s.items)
-      .find((item) => item.id === activeTab)?.label || 'Panel de Control'
+  const getItemLabel = (item: SidebarNavSection['items'][number]): string => {
+    if (item.id === 'cliente-mapa' || item.label === 'Mapa 15 Bicis') {
+      return mapNavLabel
+    }
+    return item.label
+  }
+
+  const activeItem = sections.flatMap((s) => s.items).find((item) => item.id === activeTab)
+  const activeItemLabel = activeItem ? getItemLabel(activeItem) : 'Panel de Control'
 
   return (
     <div className="min-h-screen bg-background text-foreground flex overflow-x-hidden">
@@ -90,13 +101,22 @@ export default function SidebarLayout({
                 {studioName?.charAt(0) || 'R'}
               </div>
             )}
-            <span
-              className={`font-bold text-sm truncate ${
+            <div
+              className={`flex items-center gap-1.5 min-w-0 ${
                 desktopCollapsed ? 'lg:hidden' : ''
               }`}
             >
-              {studioName}
-            </span>
+              <span className="font-bold text-sm truncate">{studioName}</span>
+              {estudioActivo && (
+                <Badge
+                  variant="secondary"
+                  className="text-[10px] font-semibold px-1.5 py-0 h-4 shrink-0"
+                  title={estudioActivo.tipo_negocio || verticalConfig.etiquetaNegocio}
+                >
+                  {verticalConfig.etiquetaNegocio}
+                </Badge>
+              )}
+            </div>
           </button>
 
           {/* Botón cerrar en móvil */}
@@ -144,15 +164,6 @@ export default function SidebarLayout({
           </div>
         )}
 
-        {/* Selector de marca/tema dentro del sidebar en pantallas compactas o expandido */}
-        <div
-          className={`p-3 border-b border-border ${
-            desktopCollapsed ? 'lg:hidden' : ''
-          }`}
-        >
-          <BrandingToolbar />
-        </div>
-
         {/* Enlaces de navegación */}
         <div className="flex-1 overflow-y-auto p-3 space-y-5">
           {sections.map((section, idx) => (
@@ -168,11 +179,12 @@ export default function SidebarLayout({
                 {section.items.map((item) => {
                   const IconComponent = item.icon
                   const isActive = activeTab === item.id
+                  const itemLabel = getItemLabel(item)
                   return (
                     <button
                       key={item.id}
                       type="button"
-                      title={item.label}
+                      title={itemLabel}
                       onClick={() => {
                         onSelectTab(item.id)
                         setMobileOpen(false)
@@ -191,7 +203,7 @@ export default function SidebarLayout({
                           desktopCollapsed ? 'lg:hidden' : ''
                         }`}
                       >
-                        {item.label}
+                        {itemLabel}
                       </span>
                     </button>
                   )
@@ -283,6 +295,14 @@ export default function SidebarLayout({
             <span className="text-xs sm:text-sm font-semibold text-foreground truncate">
               {activeItemLabel}
             </span>
+            {estudioActivo && (
+              <Badge
+                variant="outline"
+                className="hidden sm:inline-flex text-[10px] font-medium px-2 py-0 h-5 shrink-0"
+              >
+                {studioName} • {verticalConfig.etiquetaNegocio}
+              </Badge>
+            )}
           </div>
 
           <div className="flex items-center gap-2 shrink-0">{headerActions}</div>

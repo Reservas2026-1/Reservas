@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { ensureBicicletasForEmpresa } from './clasesService'
 import type { Tables, TablesInsert, TablesUpdate } from '../types/database'
 
 export interface EstudioActivo {
@@ -246,6 +247,14 @@ export const empresasService = {
         return { data: null, error: error.message }
       }
 
+      if (data.capacidad_sala !== undefined && data.capacidad_sala > 0) {
+        const capacidadObjetivo = empresaActualizada.capacidad_sala || data.capacidad_sala
+        const bicisRes = await ensureBicicletasForEmpresa(empresaId, capacidadObjetivo)
+        if (bicisRes.error) {
+          console.warn('No se pudieron sincronizar las bicicletas del estudio:', bicisRes.error)
+        }
+      }
+
       return { data: empresaActualizada, error: null }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error inesperado al actualizar el estudio'
@@ -281,6 +290,12 @@ export const empresasService = {
 
       if (error) {
         return { data: null, error: error.message }
+      }
+
+      const capacidadEstudio = nuevaEmpresa.capacidad_sala || data.capacidad_sala || 15
+      const bicisRes = await ensureBicicletasForEmpresa(nuevaEmpresa.id, capacidadEstudio)
+      if (bicisRes.error) {
+        console.warn('No se pudieron inicializar las bicicletas del estudio:', bicisRes.error)
       }
 
       return { data: nuevaEmpresa, error: null }

@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
-import type { Tables, TablesUpdate, RolUsuario } from '../types/database'
+import { ensureBicicletasForEmpresa } from './clasesService'
+import type { Tables, TablesInsert, TablesUpdate, RolUsuario } from '../types/database'
 import type { User, Session, AuthChangeEvent } from '@supabase/supabase-js'
 
 export interface SignUpParams {
@@ -25,6 +26,7 @@ export interface RegisterStudioParams {
   email: string
   password: string
   telefono?: string
+  capacidadSala?: number
 }
 
 export interface EmpresaActiva {
@@ -35,10 +37,10 @@ export interface EmpresaActiva {
 }
 
 export interface RegisterStudioResult {
-  user: User | null
+  user: User
   session: Session | null
-  perfil: Tables<'perfiles'> | null
-  empresa: Tables<'empresas'> | null
+  perfil: Tables<'perfiles'>
+  empresa: Tables<'empresas'>
 }
 
 export interface AuthResponse<T = unknown> {
@@ -115,13 +117,13 @@ export const authService = {
 
   /**
    * Registro completo de un nuevo estudio / negocio y su administrador inicial.
-   * 1. Inserta la empresa en public.empresas.
+   * 1. Inserta la empresa en public.empresas con email, teléfono, slug, tipo_negocio y branding por defecto.
    * 2. Registra el usuario administrador en supabase.auth.signUp vinculándolo con empresa_id.
-   * 3. Asegura el perfil administrador en public.perfiles.
+   * 3. Crea o actualiza el perfil administrador en public.perfiles con rol 'admin'.
    */
   async registerStudio(params: RegisterStudioParams): Promise<AuthResponse<RegisterStudioResult>> {
     try {
-      const { nombreNegocio, tipoNegocio, nombreAdmin, email, password, telefono } = params
+      const { nombreNegocio, tipoNegocio, nombreAdmin, email, password, telefono, capacidadSala } = params
 
       if (!nombreNegocio || !nombreNegocio.trim()) {
         return { data: null, error: 'El nombre del negocio o estudio es obligatorio' }
@@ -136,97 +138,145 @@ export const authService = {
         return { data: null, error: 'El nombre del administrador es obligatorio' }
       }
 
+      const cleanNombreNegocio = nombreNegocio.trim()
+      const cleanTipoNegocio = tipoNegocio?.trim() || null
+      const cleanNombreAdmin = nombreAdmin.trim()
+      const cleanEmail = email.trim().toLowerCase()
+      const cleanTelefono = telefono?.trim() || null
+
       // a) Inserta en la tabla empresas el nuevo negocio
-      const slug = generateSlug(nombreNegocio)
-      const { data: empresaData, error: empresaError } = await supabase
+      const baseSlug = generateSlug(cleanNombreNegocio)
+      const capacidadInicial =
+        capacidadSala && capacidadSala > 0 ? Math.floor(capacidadSala) : 15
+      const empresaPayload: TablesInsert<'empresas'> = {
+        nombre: cleanNombreNegocio,
+        slug: baseSlug,
+        tipo_negocio: cleanTipoNegocio,
+        email: cleanEmail,
+        telefono: cleanTelefono,
+        color_primario: '#DC2626',
+        capacidad_sala: capacidadInicial,
+        activo: true,
+      }
+
+      let { data: nuevaEmpresa, error: empresaError } = await supabase
         .from('empresas')
-        .insert({
-          nombre: nombreNegocio.trim(),
-          tipo_negocio: tipoNegocio?.trim() || null,
-          activo: true,
-          slug,
-        })
+        .insert(empresaPayload)
         .select()
         .single()
 
-      if (empresaError || !empresaData) {
+      if (empresaError?.code === '23505' && empresaError.message.toLowerCase().includes('slug')) {
+        const uniqueSlug = `${baseSlug}-${Date.now().toString(36).slice(-4)}`
+        const retryEmpresa = await supabase
+          .from('empresas')
+          .insert({
+            ...empresaPayload,
+            slug: uniqueSlug,
+          })
+          .select()
+          .single()
+
+        nuevaEmpresa = retryEmpresa.data
+        empresaError = retryEmpresa.error
+      }
+
+      if (empresaError || !nuevaEmpresa) {
         return {
           data: null,
           error: empresaError?.message || 'Error al crear la empresa en el sistema',
         }
       }
 
-      // b) Con el empresa.id resultante, realiza supabase.auth.signUp
+      // b) Con el nuevaEmpresa.id resultante, realiza supabase.auth.signUp
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         password,
         options: {
           data: {
-            nombre_completo: nombreAdmin.trim(),
-            empresa_id: empresaData.id,
+            nombre_completo: cleanNombreAdmin,
+            empresa_id: nuevaEmpresa.id,
             rol: 'admin',
-            telefono: telefono?.trim() || null,
+            telefono: cleanTelefono,
           },
         },
       })
 
-      if (authError) {
+      if (authError || !authData.user) {
         // Rollback defensivo: limpiar empresa creada si el registro auth falla
-        await supabase.from('empresas').delete().eq('id', empresaData.id)
-        return { data: null, error: authError.message }
-      }
-
-      // c) Si Supabase devuelve usuario o sesión, consulta o genera el perfil admin
-      let perfil: Tables<'perfiles'> | null = null
-
-      if (authData.user) {
-        const perfilRes = await this.getProfileById(authData.user.id)
-        if (perfilRes.data) {
-          perfil = perfilRes.data
-        } else {
-          // Si el trigger de BD aún no se ha ejecutado o hay latencia, upsert manual
-          const { data: nuevoPerfil, error: perfilInsertErr } = await supabase
-            .from('perfiles')
-            .upsert({
-              id: authData.user.id,
-              empresa_id: empresaData.id,
-              email: email.trim().toLowerCase(),
-              nombre_completo: nombreAdmin.trim(),
-              telefono: telefono?.trim() || null,
-              rol: 'admin',
-              activo: true,
-            })
-            .select()
-            .maybeSingle()
-
-          if (!perfilInsertErr && nuevoPerfil) {
-            perfil = nuevoPerfil
-          } else {
-            // Fallback en memoria si RLS bloquea insert directo desde cliente
-            perfil = {
-              id: authData.user.id,
-              empresa_id: empresaData.id,
-              email: email.trim().toLowerCase(),
-              nombre_completo: nombreAdmin.trim(),
-              documento: null,
-              telefono: telefono?.trim() || null,
-              rol: 'admin',
-              avatar_url: null,
-              activo: true,
-              created_at: new Date().toISOString(),
-              updated_at: null,
-            }
-          }
+        await supabase.from('empresas').delete().eq('id', nuevaEmpresa.id)
+        return {
+          data: null,
+          error: authError?.message || 'Error al registrar el usuario administrador',
         }
       }
 
-      // d) Retorna datos estructurados
+      // c) Crea o actualiza el perfil administrador en public.perfiles
+      const nowIso = new Date().toISOString()
+      const perfilDatos = {
+        empresa_id: nuevaEmpresa.id,
+        nombre_completo: cleanNombreAdmin,
+        email: cleanEmail,
+        telefono: cleanTelefono,
+        rol: 'admin' as RolUsuario,
+        activo: true,
+        updated_at: nowIso,
+      }
+
+      const perfilInsertPayload: TablesInsert<'perfiles'> = {
+        id: authData.user.id,
+        ...perfilDatos,
+      }
+
+      let perfil: Tables<'perfiles'> | null = null
+
+      const { data: upsertedPerfil, error: perfilUpsertErr } = await supabase
+        .from('perfiles')
+        .upsert(perfilInsertPayload, { onConflict: 'id' })
+        .select()
+        .maybeSingle()
+
+      if (!perfilUpsertErr && upsertedPerfil) {
+        perfil = upsertedPerfil
+      } else {
+        // Si el upsert directo falló, intentamos consultar y actualizar el registro existente (ej. creado por trigger)
+        const perfilRes = await this.getProfileById(authData.user.id)
+        if (perfilRes.data) {
+          const { data: updatedPerfil, error: perfilUpdateErr } = await supabase
+            .from('perfiles')
+            .update(perfilDatos)
+            .eq('id', authData.user.id)
+            .select()
+            .maybeSingle()
+
+          perfil = !perfilUpdateErr && updatedPerfil ? updatedPerfil : perfilRes.data
+        }
+      }
+
+      // Fallback en memoria si RLS bloquea acceso directo desde cliente (ej. confirmación de correo pendiente)
+      if (!perfil) {
+        perfil = {
+          id: authData.user.id,
+          documento: null,
+          avatar_url: null,
+          created_at: authData.user.created_at || nowIso,
+          ...perfilDatos,
+        }
+      }
+
+      // d) Inicializa las bicicletas del estudio según su capacidad configurada
+      const capacidadEstudio = nuevaEmpresa.capacidad_sala || capacidadInicial || 15
+      const bicisRes = await ensureBicicletasForEmpresa(nuevaEmpresa.id, capacidadEstudio)
+      if (bicisRes.error) {
+        console.warn('No se pudieron inicializar las bicicletas del estudio:', bicisRes.error)
+      }
+
+      // e) Retorna datos estructurados con perfil, empresa y sesión
       return {
         data: {
           user: authData.user,
           session: authData.session,
           perfil,
-          empresa: empresaData,
+          empresa: nuevaEmpresa,
         },
         error: null,
       }

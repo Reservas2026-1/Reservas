@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/use-toast'
-import { useBranding } from '@/context/BrandingContext'
+import { useBranding, getConfiguracionVertical } from '@/context/BrandingContext'
 import { pagosService, type PagoPendienteDetallado } from '@/services/pagosService'
 import {
   adminService,
@@ -34,7 +34,8 @@ interface PaymentValidationProps {
 export const PaymentValidation: React.FC<PaymentValidationProps> = ({
   adminId = 'usr-admin-01',
 }) => {
-  const { currentPalette, empresaId } = useBranding()
+  const { currentPalette, empresaId, studioName, estudioActivo } = useBranding()
+  const verticalConfig = getConfiguracionVertical(estudioActivo?.tipo_negocio)
 
   const [tab, setTab] = useState<'pendientes' | 'historial'>('pendientes')
 
@@ -224,12 +225,18 @@ export const PaymentValidation: React.FC<PaymentValidationProps> = ({
                   <CreditCard className={`w-5 h-5 ${currentPalette.textClass}`} />
                   Validación y Auditoría de Pagos
                 </CardTitle>
+                <Badge variant="outline" className="text-xs font-mono">
+                  {studioName}
+                </Badge>
+                <Badge variant="secondary" className="text-xs font-semibold">
+                  {verticalConfig.etiquetaNegocio}
+                </Badge>
                 <Badge variant="destructive" className="text-xs font-mono font-bold">
                   {pagos.length} pendientes
                 </Badge>
               </div>
               <CardDescription className="text-xs mt-1">
-                Verifica comprobantes Nequi/Bancolombia para acreditar clases o consulta el historial completo.
+                Verifica comprobantes Nequi/Bancolombia para acreditar {verticalConfig.sesionPlural.toLowerCase()} o consulta el historial completo.
               </CardDescription>
             </div>
 
@@ -264,7 +271,7 @@ export const PaymentValidation: React.FC<PaymentValidationProps> = ({
                 <div className="relative w-full sm:w-60">
                   <Search className="w-4 h-4 absolute left-3 top-2.5 text-muted-foreground" />
                   <Input
-                    placeholder="Buscar alumno o referencia..."
+                    placeholder={`Buscar ${verticalConfig.clienteSingular.toLowerCase()} o referencia...`}
                     className="pl-9 text-xs h-9"
                     value={busqueda}
                     onChange={(e) => setBusqueda(e.target.value)}
@@ -588,7 +595,9 @@ export const PaymentValidation: React.FC<PaymentValidationProps> = ({
                   <Eye className="w-4 h-4 text-primary" />
                   Comprobante de Transferencia
                 </CardTitle>
-                <CardDescription className="text-xs">Captura enviada por el ciclista</CardDescription>
+                <CardDescription className="text-xs">
+                  Captura enviada por el {verticalConfig.clienteSingular.toLowerCase()}
+                </CardDescription>
               </div>
               <button
                 type="button"

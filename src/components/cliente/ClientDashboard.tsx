@@ -14,6 +14,7 @@ import {
   Flame,
   Award,
   Trophy,
+  Building2,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,7 @@ interface ClientDashboardProps {
   currentUser?: Tables<'perfiles'> | null
   onNavigateToBooking: () => void
   onNavigateToPlanes?: () => void
+  onNavigateToDirectory?: () => void
   onSignOut: () => void
 }
 
@@ -69,6 +71,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
   currentUser,
   onNavigateToBooking,
   onNavigateToPlanes,
+  onNavigateToDirectory,
   onSignOut,
 }) => {
   const { currentPalette, empresaId, studioName } = useBranding()
@@ -285,6 +288,10 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
             <Badge variant="secondary" className="text-xs">
               Ciclista Activo
             </Badge>
+            <Badge variant="outline" className="text-xs gap-1 font-semibold">
+              <Building2 className={`w-3.5 h-3.5 ${currentPalette.textClass}`} />
+              <span>{studioName}</span>
+            </Badge>
             <Badge
               variant="outline"
               className="text-xs font-bold gap-1.5 border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
@@ -320,6 +327,20 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <QrIcon className="w-3.5 h-3.5" />
               <span>Ver Pase Offline</span>
+            </Button>
+          )}
+
+          {onNavigateToDirectory && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onNavigateToDirectory}
+              className="font-bold gap-1.5 text-xs h-9"
+              title="Explorar directorio y cambiar de estudio"
+            >
+              <Building2 className="w-4 h-4" />
+              <span>Cambiar de Estudio</span>
             </Button>
           )}
 

@@ -17,11 +17,15 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Combobox } from '@/components/ui/combobox'
+import { toast } from '@/components/ui/use-toast'
+import { useBranding } from '@/context/BrandingContext'
 import { authService, type EmpresaActiva } from '@/services/authService'
 import type { Tables } from '@/types/database'
 
 export interface AuthViewProps {
   onAuthSuccess: (userProfile: Tables<'perfiles'> | null) => void
+  onClose?: () => void
   initialMode?: 'signin' | 'signup' | 'register-studio'
   initialRubro?: string
   onSkipToDemo?: (rol: 'cliente' | 'admin') => void
@@ -32,34 +36,43 @@ const RUBRO_OPTIONS = [
   'Pilates',
   'Yoga',
   'Gimnasio / Entrenamiento',
-  'Salón de belleza',
-  'Consultorio profesional',
+  'CrossFit / Funcional',
   'Canchas deportivas',
+  'Salón de belleza',
+  'Barbería',
+  'Spa & Masajes',
+  'Consultorio profesional',
+  'Danza / Baile',
 ]
 
 /**
  * Normaliza y asocia el rubro recibido desde la landing page a las opciones estándar del selector.
+ * Si no se recibe rubro inicial, retorna cadena vacía para mostrar el placeholder de búsqueda.
  */
 function mapInitialRubro(rubro?: string): string {
-  if (!rubro) return RUBRO_OPTIONS[0]
+  if (!rubro || !rubro.trim()) return ''
   const lower = rubro.toLowerCase()
   if (lower.includes('spin') || lower.includes('ciclis')) return 'Spinning / Ciclismo indoor'
   if (lower.includes('pilat')) return 'Pilates'
   if (lower.includes('yoga') || lower.includes('medita')) return 'Yoga'
   if (lower.includes('gimnas') || lower.includes('entrena') || lower.includes('funcional')) return 'Gimnasio / Entrenamiento'
-  if (lower.includes('belleza') || lower.includes('barber') || lower.includes('salon')) return 'Salón de belleza'
+  if (lower.includes('barber')) return 'Barbería'
+  if (lower.includes('spa') || lower.includes('masaj')) return 'Spa & Masajes'
+  if (lower.includes('belleza') || lower.includes('salon')) return 'Salón de belleza'
   if (lower.includes('consultorio') || lower.includes('medic') || lower.includes('terap')) return 'Consultorio profesional'
   if (lower.includes('cancha') || lower.includes('deport')) return 'Canchas deportivas'
 
   const exactMatch = RUBRO_OPTIONS.find((opt) => opt.toLowerCase() === lower)
-  return exactMatch || RUBRO_OPTIONS[0]
+  return exactMatch || rubro.trim()
 }
 
 export const AuthView: React.FC<AuthViewProps> = ({
   onAuthSuccess,
+  onClose,
   initialMode = 'signin',
   initialRubro,
 }) => {
+  const { setEstudioActivo } = useBranding()
   const [mode, setMode] = useState<'signin' | 'signup' | 'register-studio'>(initialMode)
   const [loading, setLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -77,25 +90,26 @@ export const AuthView: React.FC<AuthViewProps> = ({
   const [tipoNegocio, setTipoNegocio] = useState<string>(() => mapInitialRubro(initialRubro))
   const [nombreAdmin, setNombreAdmin] = useState('')
 
-  // Empresas activas para registro de alumno
+  // Empresas activas para registro de alumno (opcional, por defecto explorar todos)
   const [empresas, setEmpresas] = useState<EmpresaActiva[]>([])
   const [loadingEmpresas, setLoadingEmpresas] = useState(false)
   const [selectedEmpresaId, setSelectedEmpresaId] = useState<string>('')
 
-  // Sincronizar props cuando cambian externamente
-  useEffect(() => {
+  const [prevInitialMode, setPrevInitialMode] = useState(initialMode)
+  if (initialMode !== prevInitialMode) {
+    setPrevInitialMode(initialMode)
     if (initialMode) {
       setMode(initialMode)
       setErrorMessage(null)
       setSuccessMessage(null)
     }
-  }, [initialMode])
+  }
 
-  useEffect(() => {
-    if (initialRubro) {
-      setTipoNegocio(mapInitialRubro(initialRubro))
-    }
-  }, [initialRubro])
+  const [prevInitialRubro, setPrevInitialRubro] = useState(initialRubro)
+  if (initialRubro !== prevInitialRubro) {
+    setPrevInitialRubro(initialRubro)
+    setTipoNegocio(mapInitialRubro(initialRubro))
+  }
 
   // Cargar lista de empresas activas cuando se entra a modo signup de alumno
   useEffect(() => {
@@ -107,9 +121,6 @@ export const AuthView: React.FC<AuthViewProps> = ({
           const res = await authService.getActiveEmpresas()
           if (isMounted && res.data) {
             setEmpresas(res.data)
-            if (res.data.length > 0 && !selectedEmpresaId) {
-              setSelectedEmpresaId(res.data[0].id)
-            }
           }
         } catch (err) {
           console.error('Error al cargar empresas activas:', err)
@@ -122,7 +133,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
         isMounted = false
       }
     }
-  }, [mode, selectedEmpresaId])
+  }, [mode])
 
   // Handler: Iniciar Sesión
   const handleSignIn = async (e: React.FormEvent) => {
@@ -147,6 +158,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
       } else {
         setSuccessMessage('¡Inicio de sesión exitoso! Redirigiendo...')
         setTimeout(() => {
+          onClose?.()
           onAuthSuccess(res.data?.perfil || null)
         }, 500)
       }
@@ -196,6 +208,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
         if (signInRes.data?.perfil) {
           setSuccessMessage('¡Cuenta creada e inicio de sesión exitoso! Redirigiendo...')
           setTimeout(() => {
+            onClose?.()
             onAuthSuccess(signInRes.data?.perfil || null)
           }, 500)
         } else {
@@ -220,6 +233,10 @@ export const AuthView: React.FC<AuthViewProps> = ({
       setErrorMessage('Por favor ingresa el nombre de tu negocio o estudio')
       return
     }
+    if (!tipoNegocio.trim()) {
+      setErrorMessage('Por favor selecciona o escribe el tipo de negocio')
+      return
+    }
     if (!nombreAdmin.trim()) {
       setErrorMessage('Por favor ingresa el nombre del administrador')
       return
@@ -237,20 +254,35 @@ export const AuthView: React.FC<AuthViewProps> = ({
     try {
       const res = await authService.registerStudio({
         nombreNegocio: nombreNegocio.trim(),
-        tipoNegocio,
+        tipoNegocio: tipoNegocio.trim(),
         nombreAdmin: nombreAdmin.trim(),
         email: email.trim(),
         password,
         telefono: telefono.trim() || undefined,
       })
 
-      if (res.error) {
-        setErrorMessage(res.error)
+      if (res.error || !res.data) {
+        setErrorMessage(res.error || 'Error al crear el estudio en el sistema')
       } else {
-        setSuccessMessage('¡Estudio creado con éxito! Iniciando sesión...')
-        setTimeout(() => {
-          onAuthSuccess(res.data?.perfil || null)
-        }, 500)
+        const { perfil, empresa } = res.data
+        if (empresa) {
+          setEstudioActivo({
+            ...empresa,
+            email: empresa.email || email.trim().toLowerCase(),
+            telefono: empresa.telefono || telefono.trim() || null,
+            tipo_negocio: empresa.tipo_negocio || tipoNegocio.trim() || null,
+          })
+        }
+
+        setSuccessMessage('¡Estudio creado con éxito! Redirigiendo a tu panel...')
+        toast({
+          variant: 'success',
+          title: '¡Estudio creado con éxito!',
+          description: `Bienvenido a ${empresa?.nombre || nombreNegocio.trim()}.`,
+        })
+
+        onClose?.()
+        onAuthSuccess(perfil || null)
       }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Error inesperado al registrar el estudio')
@@ -260,10 +292,10 @@ export const AuthView: React.FC<AuthViewProps> = ({
   }
 
   return (
-    <div className="w-full max-w-md mx-auto p-4 sm:p-6">
+    <div className="w-full max-w-md mx-auto px-4 pt-11 pb-4 sm:px-5 sm:py-5">
       <Card className="border-0 shadow-none bg-transparent">
         {/* Selector de modo estilo tabs */}
-        <div className="flex gap-1 p-1 bg-muted/80 rounded-xl mb-4 text-xs font-semibold">
+        <div className="flex gap-1 p-1 bg-muted/80 rounded-xl mb-3 text-xs font-semibold">
           <button
             type="button"
             onClick={() => {
@@ -271,10 +303,11 @@ export const AuthView: React.FC<AuthViewProps> = ({
               setErrorMessage(null)
               setSuccessMessage(null)
             }}
-            className={`flex-1 py-2 px-2 rounded-lg text-center transition-all cursor-pointer ${mode === 'signin'
+            className={`flex-1 py-1.5 px-2 rounded-lg text-center transition-all cursor-pointer ${
+              mode === 'signin'
                 ? 'bg-background shadow-xs text-foreground font-bold'
                 : 'text-muted-foreground hover:text-foreground'
-              }`}
+            }`}
           >
             Iniciar Sesión
           </button>
@@ -285,10 +318,11 @@ export const AuthView: React.FC<AuthViewProps> = ({
               setErrorMessage(null)
               setSuccessMessage(null)
             }}
-            className={`flex-1 py-2 px-2 rounded-lg text-center transition-all cursor-pointer ${mode === 'signup'
+            className={`flex-1 py-1.5 px-2 rounded-lg text-center transition-all cursor-pointer ${
+              mode === 'signup'
                 ? 'bg-background shadow-xs text-foreground font-bold'
                 : 'text-muted-foreground hover:text-foreground'
-              }`}
+            }`}
           >
             Soy Alumno
           </button>
@@ -299,18 +333,19 @@ export const AuthView: React.FC<AuthViewProps> = ({
               setErrorMessage(null)
               setSuccessMessage(null)
             }}
-            className={`flex-1 py-2 px-2 rounded-lg text-center transition-all cursor-pointer ${mode === 'register-studio'
+            className={`flex-1 py-1.5 px-2 rounded-lg text-center transition-all cursor-pointer ${
+              mode === 'register-studio'
                 ? 'bg-red-600 text-white shadow-xs font-bold'
                 : 'text-muted-foreground hover:text-foreground'
-              }`}
+            }`}
           >
             Crear Estudio
           </button>
         </div>
 
         {/* Encabezado dinámico */}
-        <CardHeader className="p-0 pb-4 space-y-1.5 text-center">
-          <div className="flex items-center justify-center gap-1.5 mb-1">
+        <CardHeader className="p-0 pb-3 space-y-1 text-center">
+          <div className="flex items-center justify-center gap-1.5">
             {mode === 'register-studio' && (
               <Badge className="bg-red-600 hover:bg-red-700 text-white text-[10px] uppercase font-bold tracking-wider">
                 <Sparkles className="w-3 h-3 mr-1" /> Prueba 30 Días Gratis
@@ -328,7 +363,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
             )}
           </div>
 
-          <CardTitle className="text-2xl font-black tracking-tight text-foreground">
+          <CardTitle className="text-xl sm:text-2xl font-black tracking-tight text-foreground">
             {mode === 'register-studio' && 'Registra tu Negocio o Estudio'}
             {mode === 'signin' && 'Iniciar Sesión'}
             {mode === 'signup' && 'Crear Cuenta de Alumno'}
@@ -337,20 +372,20 @@ export const AuthView: React.FC<AuthViewProps> = ({
           <CardDescription className="text-xs text-muted-foreground max-w-sm mx-auto">
             {mode === 'register-studio' && 'Comienza tu prueba gratuita por 30 días sin tarjeta.'}
             {mode === 'signin' && 'Ingresa tus credenciales para acceder a tu cuenta.'}
-            {mode === 'signup' && 'Inscríbete a tu estudio para reservar clases y comprar planes.'}
+            {mode === 'signup' && 'Crea una sola cuenta para explorar y reservar en cualquier estudio.'}
           </CardDescription>
         </CardHeader>
 
         {/* Notificaciones de error o éxito */}
         {errorMessage && (
-          <div className="mb-4 p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2">
+          <div className="mb-3 p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorMessage}</span>
           </div>
         )}
 
         {successMessage && (
-          <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2">
+          <div className="mb-3 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
             <span>{successMessage}</span>
           </div>
@@ -366,7 +401,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 : handleSignUp
           }
         >
-          <CardContent className="p-0 space-y-3.5">
+          <CardContent className="p-0 space-y-3">
             {/* ========================================================
                 CAMPOS MODO: REGISTRAR ESTUDIO / NEGOCIO
             ======================================================== */}
@@ -383,6 +418,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     placeholder="Ej. Studio Velox, Zen Yoga..."
                     value={nombreNegocio}
                     onChange={(e) => setNombreNegocio(e.target.value)}
+                    className="h-10"
                   />
                 </div>
 
@@ -394,18 +430,14 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     <Briefcase className="w-3.5 h-3.5" />
                     Tipo de Negocio *
                   </label>
-                  <select
+                  <Combobox
                     id="tipoNegocio"
+                    required
                     value={tipoNegocio}
-                    onChange={(e) => setTipoNegocio(e.target.value)}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-xs focus:outline-hidden focus:ring-2 focus:ring-red-500 transition-colors"
-                  >
-                    {RUBRO_OPTIONS.map((rubro) => (
-                      <option key={rubro} value={rubro}>
-                        {rubro}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setTipoNegocio}
+                    options={RUBRO_OPTIONS}
+                    placeholder="Buscar categoría: ej. Spinning, Canchas, Barbería, Spa…"
+                  />
                 </div>
 
                 <div>
@@ -419,13 +451,14 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     placeholder="Ej. Carlos Mendoza"
                     value={nombreAdmin}
                     onChange={(e) => setNombreAdmin(e.target.value)}
+                    className="h-10"
                   />
                 </div>
 
                 <div>
                   <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
                     <Mail className="w-3.5 h-3.5" />
-                    Correo Electrónico *
+                    Correo Electrónico del Estudio *
                   </label>
                   <Input
                     type="email"
@@ -433,6 +466,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     placeholder="admin@tuempresa.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    className="h-10"
                   />
                 </div>
 
@@ -447,19 +481,21 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     placeholder="Mínimo 6 caracteres"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    className="h-10"
                   />
                 </div>
 
                 <div>
                   <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
                     <Phone className="w-3.5 h-3.5" />
-                    Teléfono / WhatsApp (opcional)
+                    Teléfono / WhatsApp del Estudio (opcional)
                   </label>
                   <Input
                     type="tel"
                     placeholder="Ej. +57 300 123 4567"
                     value={telefono}
                     onChange={(e) => setTelefono(e.target.value)}
+                    className="h-10"
                   />
                 </div>
               </>
@@ -481,6 +517,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     placeholder="tu@correo.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    className="h-10"
                   />
                 </div>
 
@@ -495,6 +532,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    className="h-10"
                   />
                 </div>
               </>
@@ -506,29 +544,26 @@ export const AuthView: React.FC<AuthViewProps> = ({
             {mode === 'signup' && (
               <>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                  <label
+                    htmlFor="signupEmpresa"
+                    className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1"
+                  >
                     <Building2 className="w-3.5 h-3.5" />
-                    ¿A qué estudio o negocio te inscribes? *
+                    Estudio inicial (opcional)
                   </label>
                   {loadingEmpresas ? (
-                    <div className="flex items-center gap-2 p-2.5 text-xs text-muted-foreground border rounded-md bg-muted/30">
+                    <div className="h-10 flex items-center gap-2 px-3 text-xs text-muted-foreground border rounded-md bg-muted/30">
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-red-600" />
                       <span>Cargando estudios disponibles...</span>
                     </div>
-                  ) : empresas.length === 0 ? (
-                    <div className="p-2.5 border border-amber-300 dark:border-amber-800 rounded-md bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 text-xs">
-                      No hay estudios registrados aún. Puedes registrar el tuyo en la pestaña &quot;Crear Estudio&quot;.
-                    </div>
                   ) : (
                     <select
+                      id="signupEmpresa"
                       value={selectedEmpresaId}
                       onChange={(e) => setSelectedEmpresaId(e.target.value)}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-xs focus:outline-hidden focus:ring-2 focus:ring-red-500 transition-colors"
-                      required
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-xs focus:outline-hidden focus:ring-2 focus:ring-red-500 transition-colors"
                     >
-                      <option value="" disabled>
-                        Selecciona un estudio...
-                      </option>
+                      <option value="">Explorar todos los estudios al entrar</option>
                       {empresas.map((emp) => (
                         <option key={emp.id} value={emp.id}>
                           {emp.nombre} {emp.tipo_negocio ? `(${emp.tipo_negocio})` : ''}
@@ -549,6 +584,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     placeholder="Ej. Valeria Gómez"
                     value={nombreCompleto}
                     onChange={(e) => setNombreCompleto(e.target.value)}
+                    className="h-10"
                   />
                 </div>
 
@@ -563,6 +599,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     placeholder="alumno@correo.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    className="h-10"
                   />
                 </div>
 
@@ -577,10 +614,11 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     placeholder="Mínimo 6 caracteres"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    className="h-10"
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
                       <FileText className="w-3.5 h-3.5" />
@@ -591,6 +629,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                       placeholder="71829304"
                       value={documento}
                       onChange={(e) => setDocumento(e.target.value)}
+                      className="h-10"
                     />
                   </div>
                   <div>
@@ -603,6 +642,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                       placeholder="3001234567"
                       value={telefono}
                       onChange={(e) => setTelefono(e.target.value)}
+                      className="h-10"
                     />
                   </div>
                 </div>
@@ -610,11 +650,11 @@ export const AuthView: React.FC<AuthViewProps> = ({
             )}
           </CardContent>
 
-          <CardFooter className="p-0 pt-4 flex flex-col gap-3">
+          <CardFooter className="p-0 pt-3 flex flex-col gap-2.5">
             <Button
               type="submit"
               disabled={loading}
-              className="w-full font-bold shadow-md bg-red-600 hover:bg-red-700 text-white transition-all cursor-pointer py-2.5 h-auto"
+              className="w-full h-10 font-bold shadow-md bg-red-600 hover:bg-red-700 text-white transition-all cursor-pointer py-2"
             >
               {loading ? (
                 <>
@@ -634,7 +674,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
             </Button>
 
             {/* Enlaces de alternancia inferior */}
-            <div className="w-full text-center text-xs text-muted-foreground space-y-1.5 pt-1">
+            <div className="w-full text-center text-xs text-muted-foreground space-y-1 pt-0.5">
               {mode === 'register-studio' && (
                 <p>
                   ¿Ya tienes cuenta?{' '}

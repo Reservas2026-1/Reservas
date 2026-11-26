@@ -56,6 +56,188 @@ export interface ServiceResponse<T> {
 }
 
 /**
+ * Construye el payload estándar de inserción para una bicicleta indoor de una empresa.
+ */
+function buildBicicletaInsertPayload(empresaId: string, numero: number): TablesInsert<'bicicletas'> {
+  return {
+    empresa_id: empresaId,
+    numero,
+    codigo: `IC-${String(numero).padStart(2, '0')}`,
+    fila: Math.ceil(numero / 5),
+    columna: ((numero - 1) % 5) + 1,
+    tipo: 'indoor',
+    estado: 'disponible',
+    activo: true,
+  }
+}
+
+/**
+ * Combina el inventario de bicicletas con sus reservas activas para construir BicicletaOcupacion[].
+ */
+function mapBicicletasConOcupacion(
+  bicicletas: Tables<'bicicletas'>[],
+  reservas: Array<{ id: string; bicicleta_id: string; cliente_nombre: string; estado?: string }>
+): BicicletaOcupacion[] {
+  const reservaPorBici = new Map<string, { id: string; clienteNombre: string }>()
+  for (const res of reservas) {
+    if (!reservaPorBici.has(res.bicicleta_id) || res.estado === 'en_curso') {
+      reservaPorBici.set(res.bicicleta_id, { id: res.id, clienteNombre: res.cliente_nombre })
+    }
+  }
+
+  return bicicletas.map((bici) => {
+    const resInfo = reservaPorBici.get(bici.id)
+    const estaOcupada =
+      !!resInfo ||
+      !bici.activo ||
+      bici.estado === 'reservada' ||
+      bici.estado === 'mantenimiento' ||
+      bici.estado === 'baja'
+
+    return {
+      ...bici,
+      ocupada: estaOcupada,
+      reservaId: resInfo ? resInfo.id : null,
+      clienteNombre: resInfo ? resInfo.clienteNombre : null,
+    }
+  })
+}
+
+/**
+ * Garantiza que la empresa cuente con bicicletas numeradas del 1 hasta `cantidad`,
+ * insertando únicamente los números faltantes en estado 'disponible'.
+ */
+export async function ensureBicicletasForEmpresa(
+  empresaId: string,
+  cantidad: number
+): Promise<ServiceResponse<void>> {
+  try {
+    const cleanEmpresaId = empresaId?.trim()
+    if (!cleanEmpresaId) {
+      return { data: null, error: 'empresaId es obligatorio' }
+    }
+
+    const targetCantidad = Math.floor(cantidad)
+    if (!Number.isFinite(cantidad) || targetCantidad <= 0) {
+      return { data: null, error: 'La cantidad de bicicletas debe ser un entero positivo' }
+    }
+
+    const { data: existentes, error: fetchError } = await supabase
+      .from('bicicletas')
+      .select('numero')
+      .eq('empresa_id', cleanEmpresaId)
+
+    if (fetchError) {
+      return { data: null, error: fetchError.message }
+    }
+
+    const numerosExistentes = new Set((existentes || []).map((b) => b.numero))
+    const faltantes: TablesInsert<'bicicletas'>[] = []
+
+    for (let num = 1; num <= targetCantidad; num++) {
+      if (!numerosExistentes.has(num)) {
+        faltantes.push(buildBicicletaInsertPayload(cleanEmpresaId, num))
+      }
+    }
+
+    if (faltantes.length === 0) {
+      return { data: undefined, error: null }
+    }
+
+    const { error: insertError } = await supabase
+      .from('bicicletas')
+      .insert(faltantes)
+
+    if (insertError) {
+      if (insertError.code === '23505') {
+        const { data: recheck, error: recheckError } = await supabase
+          .from('bicicletas')
+          .select('numero')
+          .eq('empresa_id', cleanEmpresaId)
+
+        if (recheckError) {
+          return { data: null, error: recheckError.message }
+        }
+
+        const existentesActualizados = new Set((recheck || []).map((b) => b.numero))
+        const aunFaltantes = faltantes.filter((b) => !existentesActualizados.has(b.numero))
+
+        if (aunFaltantes.length === 0) {
+          return { data: undefined, error: null }
+        }
+
+        const { error: retryError } = await supabase
+          .from('bicicletas')
+          .insert(aunFaltantes)
+
+        if (retryError && retryError.code !== '23505') {
+          return { data: null, error: retryError.message }
+        }
+
+        return { data: undefined, error: null }
+      }
+
+      return { data: null, error: insertError.message }
+    }
+
+    return { data: undefined, error: null }
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'Error inesperado al sincronizar bicicletas de la empresa'
+    return { data: null, error: message }
+  }
+}
+
+/**
+ * Obtiene todas las bicicletas de una empresa junto con las reservas activas
+ * ('pendiente', 'confirmada', 'en_curso') para poblar `ocupada`, `reservaId` y `clienteNombre`.
+ */
+export async function getBicicletasByEmpresa(
+  empresaId: string
+): Promise<ServiceResponse<BicicletaOcupacion[]>> {
+  try {
+    const cleanEmpresaId = empresaId?.trim()
+    if (!cleanEmpresaId) {
+      return { data: null, error: 'empresaId es obligatorio' }
+    }
+
+    const { data: bicicletas, error: bicisError } = await supabase
+      .from('bicicletas')
+      .select('*')
+      .eq('empresa_id', cleanEmpresaId)
+      .order('numero', { ascending: true })
+
+    if (bicisError) {
+      return { data: null, error: bicisError.message }
+    }
+
+    if (!bicicletas || bicicletas.length === 0) {
+      return { data: [], error: null }
+    }
+
+    const { data: reservas, error: reservasError } = await supabase
+      .from('reservas')
+      .select('id, bicicleta_id, cliente_nombre, estado, fecha_inicio')
+      .eq('empresa_id', cleanEmpresaId)
+      .in('estado', ['pendiente', 'confirmada', 'en_curso'])
+      .order('fecha_inicio', { ascending: true })
+
+    if (reservasError) {
+      return { data: null, error: reservasError.message }
+    }
+
+    return {
+      data: mapBicicletasConOcupacion(bicicletas, reservas || []),
+      error: null,
+    }
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'Error al consultar bicicletas de la empresa'
+    return { data: null, error: message }
+  }
+}
+
+/**
  * Servicio para gestión y consulta de Clases / Sesiones de Indoor Cycling y Horarios Base
  */
 export const clasesService = {
@@ -306,6 +488,13 @@ export const clasesService = {
 
       if (!updated) {
         return { data: null, error: 'Clase no encontrada para esta empresa' }
+      }
+
+      if (data.capacidad !== undefined) {
+        const syncRes = await ensureBicicletasForEmpresa(empresaId, updated.capacidad || data.capacidad)
+        if (syncRes.error) {
+          console.warn('No se pudieron sincronizar las bicicletas tras actualizar capacidad:', syncRes.error)
+        }
       }
 
       return { data: updated, error: null }
@@ -578,29 +767,25 @@ export const clasesService = {
         return { data: null, error: reservasError.message }
       }
 
-      const reservaPorBici = new Map<string, { id: string; clienteNombre: string }>()
-      for (const res of reservas || []) {
-        reservaPorBici.set(res.bicicleta_id, { id: res.id, clienteNombre: res.cliente_nombre })
+      return {
+        data: mapBicicletasConOcupacion(bicicletas, reservas || []),
+        error: null,
       }
-
-      const resultado: BicicletaOcupacion[] = bicicletas.map((bici) => {
-        const resInfo = reservaPorBici.get(bici.id)
-        const estaOcupada = !!resInfo || bici.estado === 'mantenimiento' || bici.estado === 'baja'
-
-        return {
-          ...bici,
-          ocupada: estaOcupada,
-          reservaId: resInfo ? resInfo.id : null,
-          clienteNombre: resInfo ? resInfo.clienteNombre : null,
-        }
-      })
-
-      return { data: resultado, error: null }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al consultar mapa de bicicletas de la clase'
       return { data: null, error: message }
     }
   },
+
+  /**
+   * Garantiza que la empresa cuente con bicicletas numeradas del 1 hasta `cantidad`.
+   */
+  ensureBicicletasForEmpresa,
+
+  /**
+   * Obtiene todas las bicicletas de la empresa junto con su estado de ocupación por reservas activas.
+   */
+  getBicicletasByEmpresa,
 }
 
 /**
@@ -728,6 +913,13 @@ export async function generarProgramacionMasiva(params: {
       }
     }
 
+    if (createdIds.length > 0 && capacidad > 0) {
+      const syncRes = await ensureBicicletasForEmpresa(empresaId, capacidad)
+      if (syncRes.error) {
+        console.warn('No se pudieron sincronizar las bicicletas en programación masiva:', syncRes.error)
+      }
+    }
+
     return { data: createdIds, error: null }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Error al generar programación masiva'
@@ -782,6 +974,13 @@ export async function crearClaseEspecial(params: {
 
     if (!inserted || !inserted.id) {
       return { data: null, error: 'No se pudo obtener el ID de la clase creada' }
+    }
+
+    if (capacidad > 0) {
+      const syncRes = await ensureBicicletasForEmpresa(empresaId, capacidad)
+      if (syncRes.error) {
+        console.warn('No se pudieron sincronizar las bicicletas en clase especial:', syncRes.error)
+      }
     }
 
     return { data: inserted.id, error: null }

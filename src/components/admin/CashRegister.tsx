@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { toast } from '@/components/ui/use-toast'
-import { useBranding } from '@/context/BrandingContext'
+import { useBranding, getConfiguracionVertical } from '@/context/BrandingContext'
 import { adminService, type CierreCajaResumen } from '@/services/adminService'
 
 interface CashRegisterProps {
@@ -42,7 +42,8 @@ export const CashRegister: React.FC<CashRegisterProps> = ({
   responsableNombre = 'Administrador General',
   usuarioId = null,
 }) => {
-  const { currentPalette, empresaId, studioName } = useBranding()
+  const { currentPalette, empresaId, studioName, estudioActivo } = useBranding()
+  const verticalConfig = getConfiguracionVertical(estudioActivo?.tipo_negocio)
 
   const [fechaConsulta, setFechaConsulta] = useState<string>(
     new Date().toISOString().split('T')[0]
@@ -199,6 +200,9 @@ export const CashRegister: React.FC<CashRegisterProps> = ({
             <h1 className="text-2xl font-black tracking-tight">Arqueo y Cierre de Caja</h1>
             <Badge variant="outline" className="text-xs font-mono">
               {studioName}
+            </Badge>
+            <Badge variant="secondary" className="text-xs font-semibold">
+              {verticalConfig.etiquetaNegocio}
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">

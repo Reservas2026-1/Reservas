@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/use-toast'
-import { useBranding } from '@/context/BrandingContext'
+import { useBranding, getConfiguracionVertical } from '@/context/BrandingContext'
 import { adminService, type ClienteConTiqueteraResumen } from '@/services/adminService'
 import type { TiqueteraConPlan } from '@/services/tiqueterasService'
 import type { EstadoTiquetera, Tables } from '@/types/database'
@@ -30,7 +30,8 @@ interface ClientsViewProps {
 }
 
 export const ClientsView: React.FC<ClientsViewProps> = ({ adminId = 'usr-admin-01' }) => {
-  const { currentPalette, empresaId, studioName } = useBranding()
+  const { currentPalette, empresaId, studioName, estudioActivo } = useBranding()
+  const verticalConfig = getConfiguracionVertical(estudioActivo?.tipo_negocio)
 
   const [clientes, setClientes] = useState<ClienteConTiqueteraResumen[]>([])
   const [loading, setLoading] = useState<boolean>(true)
@@ -163,7 +164,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ adminId = 'usr-admin-0
       )
 
       if (res.success) {
-        const msg = res.mensaje || 'Plan asignado exitosamente al ciclista.'
+        const msg =
+          res.mensaje || `Plan asignado exitosamente al ${verticalConfig.clienteSingular.toLowerCase()}.`
         setFeedback({ type: 'success', mensaje: msg })
         toast({ variant: 'success', title: 'Plan acreditado', description: msg })
         setModalAsignarPlan(false)
@@ -369,14 +371,21 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ adminId = 'usr-admin-0
               <div className="flex items-center gap-2 flex-wrap">
                 <CardTitle className="text-xl flex items-center gap-2">
                   <Users className={`w-5 h-5 ${currentPalette.textClass}`} />
-                  Directorio de Ciclistas y Tiqueteras
+                  {verticalConfig.enableTiqueteras
+                    ? `Directorio de ${verticalConfig.clientePlural} y Tiqueteras`
+                    : `Directorio de ${verticalConfig.clientePlural}`}
                 </CardTitle>
                 <Badge variant="outline" className="text-xs font-mono">
                   {studioName}
                 </Badge>
+                <Badge variant="secondary" className="text-xs font-semibold">
+                  {verticalConfig.etiquetaNegocio}
+                </Badge>
               </div>
               <CardDescription className="text-xs mt-1">
-                Edita perfiles, administra tiqueteras/créditos y asigna planes desde recepción.
+                {verticalConfig.enableTiqueteras
+                  ? 'Edita perfiles, administra tiqueteras/créditos y asigna planes desde recepción.'
+                  : `Edita perfiles, datos de contacto e historial de ${verticalConfig.clientePlural.toLowerCase()}.`}
               </CardDescription>
             </div>
 
@@ -451,7 +460,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ adminId = 'usr-admin-0
           ) : clientesFiltrados.length === 0 ? (
             <div className="p-8 text-center text-xs text-muted-foreground space-y-2">
               <Users className="w-8 h-8 mx-auto opacity-30" />
-              <p>No se encontraron clientes registrados en esta sede.</p>
+              <p>No se encontraron {verticalConfig.clientePlural.toLowerCase()} registrados en esta sede.</p>
             </div>
           ) : (
             <div className="divide-y divide-border">
@@ -469,14 +478,16 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ adminId = 'usr-admin-0
                         <span className="font-extrabold text-sm text-foreground">
                           {item.cliente.nombre_completo}
                         </span>
-                        <Badge
-                          variant={tieneCreditos ? 'success' : 'secondary'}
-                          className="text-[10px]"
-                        >
-                          {tieneCreditos
-                            ? `${item.totalCreditosDisponibles} clases activas`
-                            : 'Sin saldo'}
-                        </Badge>
+                        {verticalConfig.enableTiqueteras && (
+                          <Badge
+                            variant={tieneCreditos ? 'success' : 'secondary'}
+                            className="text-[10px]"
+                          >
+                            {tieneCreditos
+                              ? `${item.totalCreditosDisponibles} ${verticalConfig.sesionPlural.toLowerCase()} activas`
+                              : 'Sin saldo'}
+                          </Badge>
+                        )}
                         {!item.cliente.activo && (
                           <Badge variant="destructive" className="text-[10px]">
                             Inactivo
@@ -497,25 +508,26 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ adminId = 'usr-admin-0
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 self-end lg:self-center shrink-0">
-                      {tiquetera ? (
-                        <div className="text-right text-xs space-y-0.5 mr-2">
-                          <div className="font-bold text-foreground flex items-center gap-1 justify-end">
-                            <Ticket className="w-3.5 h-3.5 text-primary" />
-                            <span>{tiquetera.planNombre}</span>
+                      {verticalConfig.enableTiqueteras &&
+                        (tiquetera ? (
+                          <div className="text-right text-xs space-y-0.5 mr-2">
+                            <div className="font-bold text-foreground flex items-center gap-1 justify-end">
+                              <Ticket className="w-3.5 h-3.5 text-primary" />
+                              <span>{tiquetera.planNombre}</span>
+                            </div>
+                            <div className="text-[11px] text-muted-foreground flex items-center gap-1 justify-end">
+                              <Clock className="w-3 h-3 text-amber-500" />
+                              <span>
+                                {tiquetera.diasRestantes} días restantes (
+                                {tiquetera.fechaVencimiento.split('T')[0]})
+                              </span>
+                            </div>
                           </div>
-                          <div className="text-[11px] text-muted-foreground flex items-center gap-1 justify-end">
-                            <Clock className="w-3 h-3 text-amber-500" />
-                            <span>
-                              {tiquetera.diasRestantes} días restantes (
-                              {tiquetera.fechaVencimiento.split('T')[0]})
-                            </span>
+                        ) : (
+                          <div className="text-right text-xs text-muted-foreground italic mr-2">
+                            Sin tiquetera activa
                           </div>
-                        </div>
-                      ) : (
-                        <div className="text-right text-xs text-muted-foreground italic mr-2">
-                          Sin tiquetera activa
-                        </div>
-                      )}
+                        ))}
 
                       <Button
                         type="button"
@@ -528,27 +540,31 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ adminId = 'usr-admin-0
                         <span>Editar</span>
                       </Button>
 
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleAbrirTiqueteras(item)}
-                        className="h-8 text-xs gap-1"
-                      >
-                        <Layers className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Tiqueteras ({item.totalTiqueteras})</span>
-                      </Button>
+                      {verticalConfig.enableTiqueteras && (
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleAbrirTiqueteras(item)}
+                            className="h-8 text-xs gap-1"
+                          >
+                            <Layers className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Tiqueteras ({item.totalTiqueteras})</span>
+                          </Button>
 
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleAbrirModalAsignar(item)}
-                        className="h-8 text-xs font-semibold gap-1.5"
-                      >
-                        <PlusCircle className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Asignar Plan</span>
-                      </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleAbrirModalAsignar(item)}
+                            className="h-8 text-xs font-semibold gap-1.5"
+                          >
+                            <PlusCircle className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Asignar Plan</span>
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </div>
                 )
@@ -566,7 +582,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ adminId = 'usr-admin-0
               <div className="flex justify-between items-center">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Award className={`w-4 h-4 ${currentPalette.textClass}`} />
-                  Asignar Plan a Ciclista
+                  Asignar Plan a {verticalConfig.clienteSingular}
                 </CardTitle>
                 <button
                   type="button"
@@ -577,7 +593,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ adminId = 'usr-admin-0
                 </button>
               </div>
               <CardDescription className="text-xs">
-                Acredita clases inmediatamente mediante RPC y asienta el movimiento contable en caja.
+                Acredita {verticalConfig.sesionPlural.toLowerCase()} inmediatamente mediante RPC y asienta el movimiento contable en caja.
               </CardDescription>
             </CardHeader>
 
@@ -585,11 +601,11 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ adminId = 'usr-admin-0
               <CardContent className="p-5 space-y-4 text-xs">
                 <div className="p-3 rounded-lg bg-muted/40 border space-y-1">
                   <div className="font-bold text-foreground">
-                    Ciclista: {clienteSeleccionado.cliente.nombre_completo}
+                    {verticalConfig.clienteSingular}: {clienteSeleccionado.cliente.nombre_completo}
                   </div>
                   <div className="text-muted-foreground text-[11px]">
                     Documento: {clienteSeleccionado.cliente.documento || 'N/A'} • Saldo Actual:{' '}
-                    {clienteSeleccionado.totalCreditosDisponibles} clases
+                    {clienteSeleccionado.totalCreditosDisponibles} {verticalConfig.sesionPlural.toLowerCase()}
                   </div>
                 </div>
 
@@ -785,7 +801,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ adminId = 'usr-admin-0
                   </div>
                 ) : tiqueterasCliente.length === 0 ? (
                   <p className="text-muted-foreground py-3">
-                    Este ciclista no tiene tiqueteras registradas.
+                    Este {verticalConfig.clienteSingular.toLowerCase()} no tiene tiqueteras registradas.
                   </p>
                 ) : (
                   <div className="divide-y border rounded-lg">

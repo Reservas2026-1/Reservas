@@ -14,6 +14,8 @@ export {
   clasesService,
   generarProgramacionMasiva,
   crearClaseEspecial,
+  ensureBicicletasForEmpresa,
+  getBicicletasByEmpresa,
 } from './clasesService'
 export type {
   BicicletaOcupacion,

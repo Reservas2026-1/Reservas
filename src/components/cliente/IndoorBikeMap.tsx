@@ -21,6 +21,8 @@ import {
   Plus,
   X,
   RotateCcw,
+  Building2,
+  LayoutGrid,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -40,6 +42,7 @@ interface IndoorBikeMapProps {
   currentUser?: Tables<'perfiles'> | null
   onReservaCompletada?: (response: CrearReservaSeguraResponse) => void
   onVolverAlDashboard?: () => void
+  onCambiarEstudio?: () => void
 }
 
 type TurnoFiltro = 'todas' | 'manana' | 'noche'
@@ -110,8 +113,10 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
   currentUser,
   onReservaCompletada,
   onVolverAlDashboard,
+  onCambiarEstudio,
 }) => {
-  const { currentPalette, empresaId, studioName } = useBranding()
+  const { currentPalette, empresaId, studioName, verticalConfig } = useBranding()
+  const sesionMasculina = ['Turno', 'WOD'].includes(verticalConfig.sesionSingular)
   const confirmClassId = useId()
   const confirmBikeId = useId()
   const cantidadReservasId = useId()
@@ -459,7 +464,7 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
     setSlotLimitWarning(null)
   }
 
-  // Puestos libres y cálculo de si la clase está al 100% (15 de 15 ocupadas)
+  // Puestos libres y cálculo de si la clase está al 100% de ocupación
   const puestosLibres = bicicletas.filter((b) => !b.ocupada && b.estado === 'disponible').length
   const claseLleno =
     (claseSeleccionada && claseSeleccionada.cuposDisponibles === 0) ||
@@ -609,7 +614,15 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
         toast({
           variant: 'success',
           title: '¡Reserva confirmada!',
-          description: `Bicicleta #${selectedBici.numero} apartada correctamente.`,
+          description: `${verticalConfig.recursoSingular} #${selectedBici.numero} apartad${
+            verticalConfig.recursoSingular === 'Reformer' ||
+            verticalConfig.recursoSingular === 'Sillón' ||
+            verticalConfig.recursoSingular === 'Cupo' ||
+            verticalConfig.recursoSingular === 'Consultorio' ||
+            verticalConfig.recursoSingular === 'Puesto'
+              ? 'o'
+              : 'a'
+          } correctamente.`,
         })
 
         // Actualizar bicicleta localmente
@@ -648,10 +661,24 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
     }
   }
 
-  // Agrupar bicicletas por fila (5 puestos por fila)
-  const fila1 = bicicletas.filter((b) => b.fila === 1)
-  const fila2 = bicicletas.filter((b) => b.fila === 2)
-  const fila3 = bicicletas.filter((b) => b.fila === 3)
+  const recursosActivos = bicicletas
+  const totalBicicletas = recursosActivos.length
+  const capacidadActual = claseSeleccionada?.capacidad ?? recursosActivos?.length ?? 0
+  const capacidadLlena = totalBicicletas > 0 ? totalBicicletas : capacidadActual
+  const puestosOcupadosActual =
+    totalBicicletas > 0 ? totalBicicletas - puestosLibres : claseSeleccionada?.cuposOcupados ?? 0
+  const salaTitle = `Distribución de ${verticalConfig.espacio} (Capacidad ${capacidadActual} ${verticalConfig.recursoPlural})`
+
+  // Agrupar bicicletas dinámicamente en filas de 5 puestos por fila
+  const filasBicicletas = useMemo(() => {
+    const ordenadas = [...bicicletas].sort((a, b) => a.numero - b.numero)
+    const filas: BicicletaOcupacion[][] = []
+    const porFila = 5
+    for (let i = 0; i < ordenadas.length; i += porFila) {
+      filas.push(ordenadas.slice(i, i + porFila))
+    }
+    return filas
+  }, [bicicletas])
 
   const mostrarManana = filtroTurno === 'todas' || filtroTurno === 'manana'
   const mostrarNoche = filtroTurno === 'todas' || filtroTurno === 'noche'
@@ -661,20 +688,28 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
       {/* Encabezado y Selector de Fecha */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-black tracking-tight text-foreground">
-              Reserva de Bicicletas Indoor
+              Reserva de {verticalConfig.recursoPlural}
             </h1>
             <Badge variant="secondary" className="font-mono text-xs">
-              15 Cupos
+              {totalBicicletas} Cupos
+            </Badge>
+            <Badge variant="outline" className="text-xs gap-1 font-semibold">
+              <Building2 className={`w-3.5 h-3.5 ${currentPalette.textClass}`} />
+              <span>{studioName}</span>
+            </Badge>
+            <Badge variant="secondary" className="text-xs font-semibold">
+              {verticalConfig.etiquetaNegocio}
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground">
-            Elige la cantidad de reservas semanales, filtra por turno Mañana o Noche y aparta tu bicicleta.
+            Elige la cantidad de reservas semanales, filtra por turno Mañana o Noche y aparta tu{' '}
+            {verticalConfig.recursoSingular.toLowerCase()}.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <div className="flex items-center gap-2 bg-card border rounded-lg px-3 py-1.5 shadow-xs">
             <Calendar className="w-4 h-4 text-muted-foreground" />
             <input
@@ -685,6 +720,19 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
               className="text-xs font-semibold bg-transparent outline-none cursor-pointer"
             />
           </div>
+
+          {onCambiarEstudio && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onCambiarEstudio}
+              className="text-xs font-semibold gap-1.5"
+            >
+              <Building2 className="w-3.5 h-3.5" />
+              <span>Cambiar de Estudio</span>
+            </Button>
+          )}
 
           {onVolverAlDashboard && (
             <Button variant="outline" size="sm" onClick={onVolverAlDashboard} className="text-xs">
@@ -1106,7 +1154,9 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                   {/* Barra de progreso de ocupación */}
                   <div className="space-y-1">
                     <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
-                      <span>{clase.cuposOcupados}/15 reservados</span>
+                      <span>
+                        {clase.cuposOcupados}/{clase.capacidadTotal || clase.capacidad || totalBicicletas} reservados
+                      </span>
                       <span className={esLlena ? 'text-amber-500 font-bold' : 'text-emerald-500 font-bold'}>
                         {esLlena ? '0 libres' : `${clase.cuposDisponibles} libres`}
                       </span>
@@ -1116,7 +1166,18 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                         className={`h-full transition-all duration-300 ${
                           esLlena ? 'bg-amber-500' : currentPalette.bgClass
                         }`}
-                        style={{ width: `${(clase.cuposOcupados / 15) * 100}%` }}
+                        style={{
+                          width: `${
+                            (clase.capacidadTotal || clase.capacidad || totalBicicletas) > 0
+                              ? Math.min(
+                                  100,
+                                  (clase.cuposOcupados /
+                                    (clase.capacidadTotal || clase.capacidad || totalBicicletas)) *
+                                    100
+                                )
+                              : 0
+                          }%`,
+                        }}
                       />
                     </div>
                   </div>
@@ -1136,7 +1197,7 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
             </div>
             <div>
               <span className="font-bold text-sm block">
-                ¡Clase Completa! Todos los 15 puestos han sido ocupados
+                ¡Clase Completa! Todos los {capacidadLlena} puestos han sido ocupados
               </span>
               <span className="text-[11px] opacity-90">
                 Puedes unirte a la lista de espera. Si alguien cancela con más de 2 horas de anticipación, serás asignado por orden de llegada.
@@ -1167,7 +1228,7 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
         </div>
       )}
 
-      {/* 2. Tarima y Mapa Interactivo de 15 Bicicletas */}
+      {/* 2. Tarima y Mapa Interactivo de Recursos */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
         {/* Grilla de Bicicletas (2 columnas de ancho en desktop) */}
         <div className="lg:col-span-2 space-y-4">
@@ -1176,13 +1237,21 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Bike className={`w-5 h-5 ${currentPalette.textClass}`} />
-                    Distribución de la Sala (Capacidad 15 Puestos)
+                    {verticalConfig.showBicycleMap ? (
+                      <Bike className={`w-5 h-5 ${currentPalette.textClass}`} />
+                    ) : (
+                      <LayoutGrid className={`w-5 h-5 ${currentPalette.textClass}`} />
+                    )}
+                    {salaTitle}
                   </CardTitle>
                   <CardDescription className="text-xs">
                     {claseLleno
                       ? 'Todos los puestos están reservados para este horario.'
-                      : 'Haz clic en una bicicleta libre para asignarte ese puesto durante la clase.'}
+                      : `Haz clic en ${
+                          ['Reformer', 'Sillón', 'Cupo', 'Consultorio', 'Puesto'].includes(verticalConfig.recursoSingular)
+                            ? 'un'
+                            : 'una'
+                        } ${verticalConfig.recursoSingular.toLowerCase()} libre para asignarte ese puesto durante la ${verticalConfig.sesionSingular.toLowerCase()}.`}
                   </CardDescription>
                 </div>
 
@@ -1210,7 +1279,11 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                 <div className="relative py-2.5 px-6 rounded-xl border border-dashed border-border bg-card/80 text-center shadow-sm">
                   <div className="flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
                     <Sparkles className={`w-4 h-4 ${currentPalette.textClass}`} />
-                    <span>TARIMA DEL INSTRUCTOR / PANTALLA RITMO</span>
+                    <span>
+                      {verticalConfig.showBicycleMap
+                        ? 'TARIMA DEL INSTRUCTOR / PANTALLA RITMO'
+                        : `FRENTE DE ${verticalConfig.espacio.toUpperCase()} / RECEPCIÓN`}
+                    </span>
                     <Sparkles className={`w-4 h-4 ${currentPalette.textClass}`} />
                   </div>
                   <div className="text-[10px] text-muted-foreground mt-0.5">
@@ -1223,71 +1296,76 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                 <div className="h-64 flex items-center justify-center">
                   <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
                 </div>
+              ) : filasBicicletas.length === 0 ? (
+                <div className="py-12 text-center text-xs text-muted-foreground border border-dashed rounded-xl bg-card/50 space-y-1.5 px-4">
+                  <p className="font-semibold text-foreground">
+                    No hay {verticalConfig.recursoCortoPlural} disponibles para mostrar en este {verticalConfig.espacio.toLowerCase()}.
+                  </p>
+                  <p>
+                    {claseSeleccionada
+                      ? `Verifica los puestos registrados para la capacidad (${capacidadActual}) de esta sesión.`
+                      : `Selecciona o programa una ${verticalConfig.sesionSingular.toLowerCase()} para visualizar la distribución de puestos.`}
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-4">
-                  {/* Fila 1 (Front Row: Bicicletas 1 a 5) */}
-                  <div>
-                    <div className="text-[11px] font-semibold text-muted-foreground mb-1.5 px-1 flex justify-between">
-                      <span>Fila 1 — Frente a Tarima</span>
-                      <span className="text-[10px] text-muted-foreground font-mono">Bicis 01 - 05</span>
-                    </div>
-                    <div className="grid grid-cols-5 gap-2 sm:gap-3">
-                      {fila1.map((bike) => (
-                        <BikeSeatButton
-                          key={bike.id}
-                          bike={bike}
-                          isSelected={selectedBici?.id === bike.id}
-                          onSelect={handleSelectBike}
-                          palette={currentPalette}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                  {filasBicicletas.map((filaItems, rowIndex) => {
+                    const firstNum = String(filaItems[0]?.numero ?? rowIndex * 5 + 1).padStart(2, '0')
+                    const lastNum = String(
+                      filaItems[filaItems.length - 1]?.numero ?? rowIndex * 5 + filaItems.length
+                    ).padStart(2, '0')
+                    const zonaLabel =
+                      rowIndex === 0
+                        ? 'Frente'
+                        : rowIndex === filasBicicletas.length - 1 && filasBicicletas.length > 1
+                        ? 'Zona Posterior'
+                        : 'Zona Central'
 
-                  {/* Fila 2 (Middle Row: Bicicletas 6 a 10) */}
-                  <div>
-                    <div className="text-[11px] font-semibold text-muted-foreground mb-1.5 px-1 flex justify-between">
-                      <span>Fila 2 — Zona Central</span>
-                      <span className="text-[10px] text-muted-foreground font-mono">Bicis 06 - 10</span>
-                    </div>
-                    <div className="grid grid-cols-5 gap-2 sm:gap-3">
-                      {fila2.map((bike) => (
-                        <BikeSeatButton
-                          key={bike.id}
-                          bike={bike}
-                          isSelected={selectedBici?.id === bike.id}
-                          onSelect={handleSelectBike}
-                          palette={currentPalette}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Fila 3 (Back Row: Bicicletas 11 a 15) */}
-                  <div>
-                    <div className="text-[11px] font-semibold text-muted-foreground mb-1.5 px-1 flex justify-between">
-                      <span>Fila 3 — Zona Elevada Trasera</span>
-                      <span className="text-[10px] text-muted-foreground font-mono">Bicis 11 - 15</span>
-                    </div>
-                    <div className="grid grid-cols-5 gap-2 sm:gap-3">
-                      {fila3.map((bike) => (
-                        <BikeSeatButton
-                          key={bike.id}
-                          bike={bike}
-                          isSelected={selectedBici?.id === bike.id}
-                          onSelect={handleSelectBike}
-                          palette={currentPalette}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                    return (
+                      <div key={`fila-${rowIndex + 1}`}>
+                        <div className="text-[11px] font-semibold text-muted-foreground mb-1.5 px-1 flex justify-between">
+                          <span>
+                            Fila {rowIndex + 1} — {zonaLabel}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            {verticalConfig.recursoPlural}{' '}
+                            {firstNum === lastNum ? firstNum : `${firstNum} - ${lastNum}`}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-5 gap-2 sm:gap-3">
+                          {filaItems.map((bike) => (
+                            <BikeSeatButton
+                              key={bike.id}
+                              bike={bike}
+                              isSelected={selectedBici?.id === bike.id}
+                              onSelect={handleSelectBike}
+                              palette={currentPalette}
+                              recursoLabel={verticalConfig.recursoSingular}
+                              showBikeIcon={verticalConfig.showBicycleMap}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
 
               {/* Indicador inferior */}
               <div className="mt-6 text-center text-xs text-muted-foreground flex items-center justify-center gap-1.5">
-                <Bike className="w-3.5 h-3.5" />
-                <span>Stages SC3 Smart Bikes con medidor de potencia y resistencia magnética.</span>
+                {verticalConfig.showBicycleMap ? (
+                  <>
+                    <Bike className="w-3.5 h-3.5" />
+                    <span>Stages SC3 Smart Bikes con medidor de potencia y resistencia magnética.</span>
+                  </>
+                ) : (
+                  <>
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>
+                      Equipamiento verificado de {studioName} ({verticalConfig.recursoPlural}).
+                    </span>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -1298,13 +1376,17 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
           <Card className="border-border/80 shadow-md sticky top-6">
             <CardHeader className="p-4 border-b">
               <CardTitle className="text-base flex items-center gap-2">
-                <Bike className={`w-4 h-4 ${currentPalette.textClass}`} />
-                {claseLleno ? 'Estado de la Clase' : 'Puesto Seleccionado'}
+                {verticalConfig.showBicycleMap ? (
+                  <Bike className={`w-4 h-4 ${currentPalette.textClass}`} />
+                ) : (
+                  <LayoutGrid className={`w-4 h-4 ${currentPalette.textClass}`} />
+                )}
+                {claseLleno ? `Estado de ${sesionMasculina ? 'l' : 'la'} ${verticalConfig.sesionSingular}` : `${verticalConfig.recursoSingular} Seleccionada`}
               </CardTitle>
               <CardDescription className="text-xs">
                 {claseLleno
                   ? 'Gestiona tu turno en la lista de espera.'
-                  : 'Verifica los detalles antes de apartar tu bici.'}
+                  : `Verifica los detalles antes de apartar tu ${verticalConfig.recursoSingular.toLowerCase()}.`}
               </CardDescription>
             </CardHeader>
 
@@ -1358,9 +1440,11 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                     <div className="p-4 rounded-xl border border-dashed border-amber-500/40 bg-card space-y-3 text-center">
                       <Clock4 className="w-8 h-8 mx-auto text-amber-500 opacity-80" />
                       <div>
-                        <span className="font-bold text-sm block">Puestos Agotados (15/15)</span>
+                        <span className="font-bold text-sm block">
+                          Puestos Agotados ({puestosOcupadosActual}/{capacidadLlena})
+                        </span>
                         <p className="text-[11px] text-muted-foreground mt-1">
-                          Únete a la lista de espera para recibir notificación automática tan pronto como se libere una bicicleta.
+                          Únete a la lista de espera para recibir notificación automática tan pronto como se libere un puesto.
                         </p>
                       </div>
 
@@ -1390,10 +1474,10 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                   <div className="flex items-center justify-between">
                     <div>
                       <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
-                        Bicicleta Indoor
+                        {verticalConfig.recursoSingular}
                       </span>
                       <div className="text-2xl font-black flex items-center gap-2">
-                        <span>Puesto #{selectedBici.numero}</span>
+                        <span>{verticalConfig.recursoSingular} #{selectedBici.numero}</span>
                         <Badge variant="outline" className="text-xs font-mono">
                           {selectedBici.codigo}
                         </Badge>
@@ -1427,8 +1511,14 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                 </div>
               ) : (
                 <div className="p-6 rounded-xl border border-dashed text-center text-muted-foreground space-y-2">
-                  <Bike className="w-8 h-8 mx-auto opacity-30" />
-                  <p className="font-medium text-xs">Ninguna bicicleta seleccionada</p>
+                  {verticalConfig.showBicycleMap ? (
+                    <Bike className="w-8 h-8 mx-auto opacity-30" />
+                  ) : (
+                    <LayoutGrid className="w-8 h-8 mx-auto opacity-30" />
+                  )}
+                  <p className="font-medium text-xs">
+                    Ningún {verticalConfig.recursoSingular.toLowerCase()} seleccionado
+                  </p>
                   <p className="text-[11px] text-muted-foreground">
                     Toca uno de los puestos verdes disponibles en el mapa para continuar.
                   </p>
@@ -1516,7 +1606,7 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                   <span>
                     {selectedBloques.length > 1
                       ? `Confirmar ${selectedBloques.length} Reservas`
-                      : 'Confirmar Reserva de Bici'}
+                      : `Confirmar Reserva de ${verticalConfig.recursoSingular}`}
                   </span>
                   <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
@@ -1545,7 +1635,7 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                 </button>
               </div>
               <CardDescription className="text-xs">
-                Se apartará la Bici #{selectedBici.numero} a tu nombre mediante la función RPC segura.
+                Se apartará {verticalConfig.recursoSingular} #{selectedBici.numero} a tu nombre mediante la función RPC segura.
               </CardDescription>
             </CardHeader>
 
@@ -1562,15 +1652,15 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                 <div className="grid grid-cols-2 gap-2 bg-muted/40 p-3 rounded-lg border text-xs">
                   <div>
                     <label htmlFor={confirmBikeId} className="text-[10px] text-muted-foreground block">
-                      Bicicleta
+                      {verticalConfig.recursoSingular}
                     </label>
                     <span id={confirmBikeId} className="font-bold text-sm">
-                      Puesto #{selectedBici.numero}
+                      #{selectedBici.numero}
                     </span>
                   </div>
                   <div>
                     <label htmlFor={confirmClassId} className="text-[10px] text-muted-foreground block">
-                      {selectedBloques.length > 1 ? 'Reservas semanales' : 'Clase'}
+                      {selectedBloques.length > 1 ? 'Reservas semanales' : verticalConfig.sesionSingular}
                     </label>
                     <span id={confirmClassId} className="font-bold text-xs truncate block">
                       {selectedBloques.length > 1
@@ -1598,11 +1688,11 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                   </div>
                 )}
 
-                {/* Formulario con datos del ciclista */}
+                {/* Formulario con datos del cliente */}
                 <div className="space-y-2">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground block mb-1">
-                      Nombre del Ciclista
+                      Nombre del {verticalConfig.clienteSingular}
                     </label>
                     <Input
                       required
@@ -1645,7 +1735,7 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="ciclista@ejemplo.com"
+                      placeholder="correo@ejemplo.com"
                     />
                   </div>
                 </div>
@@ -1798,15 +1888,24 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
   )
 }
 
-// Componente interactivo para cada puesto / asiento de bicicleta
+// Componente interactivo para cada puesto / recurso reservable
 interface BikeSeatButtonProps {
   bike: BicicletaOcupacion
   isSelected: boolean
   onSelect: (bike: BicicletaOcupacion) => void
   palette: { bgClass: string; borderClass: string; textClass: string; ringClass: string }
+  recursoLabel?: string
+  showBikeIcon?: boolean
 }
 
-const BikeSeatButton: React.FC<BikeSeatButtonProps> = ({ bike, isSelected, onSelect, palette }) => {
+const BikeSeatButton: React.FC<BikeSeatButtonProps> = ({
+  bike,
+  isSelected,
+  onSelect,
+  palette,
+  recursoLabel = 'Recurso',
+  showBikeIcon = true,
+}) => {
   const isAvailable = !bike.ocupada && bike.estado === 'disponible'
 
   let baseClasses =
@@ -1829,8 +1928,8 @@ const BikeSeatButton: React.FC<BikeSeatButtonProps> = ({ bike, isSelected, onSel
       className={baseClasses}
       title={
         isAvailable
-          ? `Bici #${bike.numero} (${bike.codigo}) - Disponible`
-          : `Bici #${bike.numero} - Reservada por otro ciclista`
+          ? `${recursoLabel} #${bike.numero} (${bike.codigo}) - Disponible`
+          : `${recursoLabel} #${bike.numero} - Ocupado`
       }
     >
       {/* Indicador superior de Batería o Estado */}
@@ -1851,9 +1950,13 @@ const BikeSeatButton: React.FC<BikeSeatButtonProps> = ({ bike, isSelected, onSel
         )}
       </div>
 
-      {/* Ícono central de la Bicicleta */}
+      {/* Ícono central del recurso */}
       <div className="my-auto">
-        <Bike className={`w-5 h-5 sm:w-6 sm:h-6 ${isSelected ? 'text-white' : ''}`} />
+        {showBikeIcon ? (
+          <Bike className={`w-5 h-5 sm:w-6 sm:h-6 ${isSelected ? 'text-white' : ''}`} />
+        ) : (
+          <LayoutGrid className={`w-5 h-5 sm:w-6 sm:h-6 ${isSelected ? 'text-white' : ''}`} />
+        )}
       </div>
 
       {/* Pie con estado */}

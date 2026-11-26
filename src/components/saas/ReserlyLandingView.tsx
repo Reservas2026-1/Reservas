@@ -444,6 +444,7 @@ export const ReserlyLandingView: React.FC<ReserlyLandingViewProps> = ({
 
             {/* Componente AuthView existente */}
             <AuthView
+              onClose={() => setIsAuthModalOpen(false)}
               onAuthSuccess={(profile) => {
                 setIsAuthModalOpen(false)
                 onAuthSuccess(profile)

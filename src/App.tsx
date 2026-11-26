@@ -1,7 +1,8 @@
-import { useState, useEffect, Suspense, lazy } from 'react'
+import { useState, useEffect, useMemo, useCallback, Suspense, lazy } from 'react'
 import {
   Bike,
   LayoutDashboard,
+  LayoutGrid,
   CalendarCheck,
   CheckSquare,
   Wallet,
@@ -20,13 +21,15 @@ import {
   QrCode,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/toaster'
-import { BrandingProvider, useBranding } from '@/context/BrandingContext'
+import { BrandingProvider, useBranding, getConfiguracionVertical } from '@/context/BrandingContext'
 import { BrandingToolbar } from '@/components/ui/branding-toolbar'
 import SidebarLayout, { type SidebarNavSection } from '@/components/layout/SidebarLayout'
 import { LandingReserlyView } from '@/components/saas/LandingReserlyView'
 import { ClientDashboard } from '@/components/cliente/ClientDashboard'
 import { authService } from '@/services/authService'
+import { empresasService } from '@/services/empresasService'
 import type { Tables } from '@/types'
 
 // Carga diferida (React.lazy) para optimización del bundle
@@ -57,6 +60,7 @@ export type TabMode =
   | 'admin-pagos'
   | 'admin-asistencias'
   | 'admin-bicicletas'
+  | 'admin-canchas'
   | 'admin-caja'
   | 'admin-branding'
 
@@ -87,40 +91,6 @@ const mockAdminProfile: Tables<'perfiles'> = {
   created_at: new Date().toISOString(),
   updated_at: null,
 }
-
-const NAVIGATION_SECTIONS: SidebarNavSection[] = [
-  {
-    title: 'Portal Cliente',
-    items: [
-      { id: 'cliente-dashboard', label: 'Mi Dashboard', icon: Ticket },
-      { id: 'cliente-mapa', label: 'Mapa 15 Bicis', icon: MapPin },
-      { id: 'cliente-planes', label: 'Comprar Clases', icon: ShoppingCart },
-      { id: 'saas-directorio', label: 'Directorio Estudios', icon: Building2 },
-    ],
-  },
-  {
-    title: 'Administración',
-    items: [
-      { id: 'admin-dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { id: 'admin-reservas', label: 'Reservas', icon: CalendarCheck },
-      { id: 'admin-clientes', label: 'Clientes', icon: Users },
-      { id: 'admin-calendario', label: 'Horarios y clases', icon: Clock },
-      { id: 'admin-planificaciones', label: 'Planificaciones', icon: ClipboardList },
-      { id: 'admin-planes', label: 'Planes', icon: Package },
-      { id: 'admin-asignar-planes', label: 'Asignar planes', icon: UserPlus },
-      { id: 'admin-pagos', label: 'Pagos', icon: CheckSquare },
-      { id: 'admin-asistencias', label: 'Asistencias', icon: QrCode },
-      { id: 'admin-bicicletas', label: 'Bicicletas', icon: Bike },
-    ],
-  },
-  {
-    title: 'Operación y Marca',
-    items: [
-      { id: 'admin-caja', label: 'Caja', icon: Wallet },
-      { id: 'admin-branding', label: 'Marca Blanca', icon: Sliders },
-    ],
-  },
-]
 
 // Componente accesible de carga para Suspense
 function ViewSuspenseFallback() {
@@ -154,13 +124,72 @@ function AdminSectionBanner({ title, description }: { title: string; description
   )
 }
 
+function isAdminUser(profile: Tables<'perfiles'> | null): boolean {
+  return profile?.rol === 'admin' || profile?.rol === 'superadmin'
+}
+
 function MainApp() {
-  const { studioName, currentPalette, empresaId } = useBranding()
+  const { studioName, currentPalette, empresaId, estudioActivo, setEstudioActivo } = useBranding()
+  const verticalConfig = useMemo(
+    () => getConfiguracionVertical(estudioActivo?.tipo_negocio),
+    [estudioActivo?.tipo_negocio]
+  )
 
   // Estado de usuario y sesión (por defecto no autenticado para mostrar la Landing Page comercial)
   const [currentUser, setCurrentUser] = useState<Tables<'perfiles'> | null>(null)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const [activeTab, setActiveTab] = useState<TabMode>('cliente-dashboard')
+  const [activeTab, setActiveTab] = useState<TabMode>('saas-directorio')
+
+  const syncEstudioForProfile = useCallback(
+    async (profile: Tables<'perfiles'> | null) => {
+      const targetEmpresaId = profile?.empresa_id
+      if (!targetEmpresaId || targetEmpresaId === 'emp-velo-001') return
+      if (estudioActivo?.id === targetEmpresaId) return
+
+      try {
+        const [estudioRes, empresasMetaRes] = await Promise.all([
+          empresasService.getEstudioById(targetEmpresaId),
+          authService.getActiveEmpresas(),
+        ])
+        if (estudioRes.data) {
+          const metaMatch = (empresasMetaRes.data || []).find((m) => m.id === targetEmpresaId)
+          setEstudioActivo({
+            ...estudioRes.data,
+            tipo_negocio: metaMatch?.tipo_negocio ?? null,
+          })
+        }
+      } catch (err) {
+        console.warn('No se pudo sincronizar el estudio del usuario:', err)
+      }
+    },
+    [estudioActivo?.id, setEstudioActivo]
+  )
+
+  useEffect(() => {
+    if (isLoggedIn && currentUser) {
+      void syncEstudioForProfile(currentUser)
+    }
+  }, [isLoggedIn, currentUser, syncEstudioForProfile])
+
+  // Derivar la pestaña activa segura cuando el vertical del estudio oculta un módulo
+  const resolvedActiveTab = useMemo<TabMode>(() => {
+    if (activeTab === 'admin-bicicletas' && !verticalConfig.showBicycleMap) {
+      return verticalConfig.showCourtManagement ? 'admin-canchas' : 'admin-dashboard'
+    }
+    if (activeTab === 'admin-canchas' && !verticalConfig.showCourtManagement) {
+      return verticalConfig.showBicycleMap ? 'admin-bicicletas' : 'admin-dashboard'
+    }
+    if (activeTab === 'admin-asignar-planes' && !verticalConfig.enableTiqueteras) {
+      return 'admin-dashboard'
+    }
+    if (activeTab === 'admin-planificaciones' && !verticalConfig.enablePlanificaciones) {
+      return 'admin-dashboard'
+    }
+    if (activeTab === 'admin-asistencias' && !verticalConfig.enableAsistenciasQR) {
+      return 'admin-dashboard'
+    }
+    return activeTab
+  }, [activeTab, verticalConfig])
 
   // Suscripción a cambios de autenticación de Supabase Auth
   useEffect(() => {
@@ -174,11 +203,7 @@ function MainApp() {
           if (isMounted && profileRes.data) {
             setCurrentUser(profileRes.data)
             setIsLoggedIn(true)
-            if (profileRes.data.rol === 'admin') {
-              setActiveTab('admin-dashboard')
-            } else {
-              setActiveTab('cliente-dashboard')
-            }
+            setActiveTab(isAdminUser(profileRes.data) ? 'admin-dashboard' : 'saas-directorio')
           }
         }
       } catch (e) {
@@ -194,11 +219,7 @@ function MainApp() {
         if (profileRes.data) {
           setCurrentUser(profileRes.data)
           setIsLoggedIn(true)
-          if (profileRes.data.rol === 'admin') {
-            setActiveTab('admin-dashboard')
-          } else {
-            setActiveTab('cliente-dashboard')
-          }
+          setActiveTab(isAdminUser(profileRes.data) ? 'admin-dashboard' : 'saas-directorio')
         }
       } else if (event === 'SIGNED_OUT') {
         setCurrentUser(null)
@@ -212,14 +233,93 @@ function MainApp() {
     }
   }, [])
 
+  const showClientMapTab =
+    verticalConfig.showBicycleMap ||
+    verticalConfig.showResourceMap ||
+    verticalConfig.showCourtManagement
+
+  const navigationSections = useMemo<SidebarNavSection[]>(() => {
+    const portalClienteItems: SidebarNavSection['items'] = [
+      { id: 'saas-directorio', label: 'Directorio Estudios', icon: Building2 },
+      { id: 'cliente-dashboard', label: 'Mi Dashboard', icon: Ticket },
+      ...(showClientMapTab
+        ? [
+            {
+              id: 'cliente-mapa',
+              label: verticalConfig.navMapaLabel,
+              icon: verticalConfig.showBicycleMap ? Bike : MapPin,
+            },
+          ]
+        : []),
+      {
+        id: 'cliente-planes',
+        label: verticalConfig.enableTiqueteras
+          ? `Comprar ${verticalConfig.sesionPlural}`
+          : 'Comprar Servicios',
+        icon: ShoppingCart,
+      },
+    ]
+
+    const adminItems: SidebarNavSection['items'] = [
+      { id: 'admin-dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      {
+        id: 'admin-reservas',
+        label:
+          verticalConfig.sesionSingular === 'Cita' || verticalConfig.sesionSingular === 'Consulta'
+            ? `Agenda de ${verticalConfig.sesionPlural}`
+            : 'Reservas',
+        icon: CalendarCheck,
+      },
+      { id: 'admin-clientes', label: verticalConfig.clientePlural, icon: Users },
+      { id: 'admin-calendario', label: verticalConfig.navHorariosLabel, icon: Clock },
+      ...(verticalConfig.enablePlanificaciones
+        ? [
+            {
+              id: 'admin-planificaciones',
+              label: verticalConfig.navPlanificacionesLabel,
+              icon: ClipboardList,
+            },
+          ]
+        : []),
+      { id: 'admin-planes', label: verticalConfig.navPlanesLabel, icon: Package },
+      ...(verticalConfig.enableTiqueteras
+        ? [
+            {
+              id: 'admin-asignar-planes',
+              label: verticalConfig.navAsignarPlanesLabel,
+              icon: UserPlus,
+            },
+          ]
+        : []),
+      { id: 'admin-pagos', label: 'Pagos', icon: CheckSquare },
+      ...(verticalConfig.enableAsistenciasQR
+        ? [{ id: 'admin-asistencias', label: verticalConfig.navAsistenciasLabel, icon: QrCode }]
+        : []),
+      ...(verticalConfig.showBicycleMap
+        ? [{ id: 'admin-bicicletas', label: 'Bicicletas', icon: Bike }]
+        : []),
+      ...(verticalConfig.showCourtManagement
+        ? [{ id: 'admin-canchas', label: 'Gestión de Canchas', icon: LayoutGrid }]
+        : []),
+    ]
+
+    return [
+      { title: 'Portal Cliente', items: portalClienteItems },
+      { title: 'Administración', items: adminItems },
+      {
+        title: 'Operación y Marca',
+        items: [
+          { id: 'admin-caja', label: 'Caja', icon: Wallet },
+          { id: 'admin-branding', label: 'Marca Blanca', icon: Sliders },
+        ],
+      },
+    ]
+  }, [showClientMapTab, verticalConfig])
+
   const handleAuthSuccess = (profile: Tables<'perfiles'> | null) => {
     setCurrentUser(profile)
     setIsLoggedIn(true)
-    if (profile?.rol === 'admin') {
-      setActiveTab('admin-dashboard')
-    } else {
-      setActiveTab('cliente-dashboard')
-    }
+    setActiveTab(isAdminUser(profile) ? 'admin-dashboard' : 'saas-directorio')
   }
 
   const handleSkipToDemo = (rol: 'cliente' | 'admin') => {
@@ -230,14 +330,15 @@ function MainApp() {
     } else {
       setCurrentUser(mockClienteProfile)
       setIsLoggedIn(true)
-      setActiveTab('cliente-dashboard')
+      setActiveTab('saas-directorio')
     }
   }
 
   const handleSignOut = () => {
+    void authService.signOut().catch(() => {})
     setCurrentUser(null)
     setIsLoggedIn(false)
-    setActiveTab('cliente-dashboard')
+    setActiveTab('saas-directorio')
   }
 
   // Si no está autenticado, mostramos la Landing Page Comercial Reserly
@@ -250,50 +351,89 @@ function MainApp() {
     )
   }
 
+  const userIsAdmin = isAdminUser(currentUser)
+
   return (
     <SidebarLayout
-      sections={NAVIGATION_SECTIONS}
-      activeTab={activeTab}
+      sections={navigationSections}
+      activeTab={resolvedActiveTab}
       onSelectTab={(tabId) => setActiveTab(tabId as TabMode)}
       currentUser={currentUser}
       onSignOut={handleSignOut}
-      onLogoClick={() => setActiveTab('cliente-dashboard')}
-      headerActions={<BrandingToolbar />}
+      onLogoClick={() => setActiveTab(userIsAdmin ? 'admin-dashboard' : 'saas-directorio')}
+      headerActions={
+        <div className="flex items-center gap-2">
+          {!userIsAdmin && resolvedActiveTab !== 'saas-directorio' && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setActiveTab('saas-directorio')}
+              className="h-8 text-xs font-semibold gap-1.5"
+              title="Explorar directorio y elegir otro estudio"
+            >
+              <Building2 className="w-3.5 h-3.5" />
+              <span>Cambiar de Estudio</span>
+            </Button>
+          )}
+          <BrandingToolbar />
+        </div>
+      }
       footer={
         <footer className="border-t py-4 px-4 text-center text-xs text-muted-foreground mt-auto bg-card/30">
           <div className="flex items-center justify-center gap-1.5 flex-wrap">
             <Sparkles className={`w-3.5 h-3.5 ${currentPalette.textClass} shrink-0`} />
             <span>
-              {studioName} — Reservas Multi-Tenant en React 19 + TypeScript + Tailwind CSS v4 + Supabase RPC
+              {studioName} ({verticalConfig.etiquetaNegocio}) — Reservas Multi-Tenant en React 19 + TypeScript + Tailwind CSS v4 + Supabase RPC
             </span>
           </div>
         </footer>
       }
     >
       <Suspense fallback={<ViewSuspenseFallback />}>
-        {/* Vista: Dashboard del Ciclista */}
-        {activeTab === 'cliente-dashboard' && (
+        {/* Vista: Directorio SaaS de Estudios (landing por defecto para alumnos) */}
+        {resolvedActiveTab === 'saas-directorio' && (
+          <EstudiosDirectoryView
+            allowCreateStudio={userIsAdmin}
+            onEstudioSeleccionado={(estudio) => {
+              const nextConfig = getConfiguracionVertical(estudio.tipo_negocio)
+              const hasMap =
+                nextConfig.showBicycleMap ||
+                nextConfig.showResourceMap ||
+                nextConfig.showCourtManagement
+              setActiveTab(hasMap ? 'cliente-mapa' : 'cliente-dashboard')
+            }}
+            onVolver={() => setActiveTab('cliente-dashboard')}
+          />
+        )}
+
+        {/* Vista: Dashboard del Cliente */}
+        {resolvedActiveTab === 'cliente-dashboard' && (
           <ClientDashboard
             currentUser={currentUser}
-            onNavigateToBooking={() => setActiveTab('cliente-mapa')}
+            onNavigateToBooking={() =>
+              setActiveTab(showClientMapTab ? 'cliente-mapa' : 'cliente-planes')
+            }
             onNavigateToPlanes={() => setActiveTab('cliente-planes')}
+            onNavigateToDirectory={() => setActiveTab('saas-directorio')}
             onSignOut={handleSignOut}
           />
         )}
 
-        {/* Vista: Mapa Interactivo de las 15 Bicicletas */}
-        {activeTab === 'cliente-mapa' && (
+        {/* Vista: Mapa Interactivo de Recursos / Puestos */}
+        {resolvedActiveTab === 'cliente-mapa' && (
           <IndoorBikeMap
             currentUser={currentUser}
             onReservaCompletada={() => {
               setActiveTab('cliente-dashboard')
             }}
             onVolverAlDashboard={() => setActiveTab('cliente-dashboard')}
+            onCambiarEstudio={() => setActiveTab('saas-directorio')}
           />
         )}
 
         {/* Vista: Compra de Planes y Pagos Nequi/Wompi */}
-        {activeTab === 'cliente-planes' && (
+        {resolvedActiveTab === 'cliente-planes' && (
           <PlanesPagosView
             currentUser={currentUser}
             onVolver={() => setActiveTab('cliente-dashboard')}
@@ -301,64 +441,58 @@ function MainApp() {
           />
         )}
 
-        {/* Vista: Directorio SaaS de Estudios y Sedes */}
-        {activeTab === 'saas-directorio' && (
-          <EstudiosDirectoryView
-            onEstudioSeleccionado={() => setActiveTab('cliente-dashboard')}
-            onVolver={() => setActiveTab('cliente-dashboard')}
-          />
-        )}
-
         {/* Vistas Administrativas */}
-        {activeTab === 'admin-dashboard' && (
+        {resolvedActiveTab === 'admin-dashboard' && (
           <AdminDashboard onNavigateTab={(tab) => setActiveTab(tab)} />
         )}
 
-        {activeTab === 'admin-reservas' && (
+        {resolvedActiveTab === 'admin-reservas' && (
           <>
             <AdminSectionBanner
-              title="Gestión de Reservas"
-              description="Consulta cupos ocupados por sesión, reservas activas y asignación de bicicletas."
+              title={`Gestión de Reservas (${verticalConfig.sesionPlural})`}
+              description={`Consulta cupos ocupados por ${verticalConfig.sesionSingular.toLowerCase()}, reservas activas y asignación de ${verticalConfig.recursoCortoPlural}.`}
             />
             <CalendarView />
           </>
         )}
 
-        {activeTab === 'admin-clientes' && <ClientsView adminId={currentUser?.id} />}
+        {resolvedActiveTab === 'admin-clientes' && <ClientsView adminId={currentUser?.id} />}
 
-        {activeTab === 'admin-calendario' && <CalendarView />}
+        {resolvedActiveTab === 'admin-calendario' && <CalendarView />}
 
-        {activeTab === 'admin-planificaciones' && <PlanificacionesView empresaId={empresaId} />}
+        {resolvedActiveTab === 'admin-planificaciones' && verticalConfig.enablePlanificaciones && (
+          <PlanificacionesView empresaId={empresaId} />
+        )}
 
-        {activeTab === 'admin-planes' && <PlanesAdminView />}
+        {resolvedActiveTab === 'admin-planes' && <PlanesAdminView />}
 
-        {activeTab === 'admin-asignar-planes' && (
+        {resolvedActiveTab === 'admin-asignar-planes' && verticalConfig.enableTiqueteras && (
           <>
             <AdminSectionBanner
-              title="Asignar Planes y Tiqueteras"
-              description="Selecciona un cliente para acreditar manualmente un plan o tiquetera."
+              title={verticalConfig.navAsignarPlanesLabel}
+              description={`Selecciona un ${verticalConfig.clienteSingular.toLowerCase()} para acreditar manualmente un plan o tiquetera.`}
             />
             <ClientsView adminId={currentUser?.id} />
           </>
         )}
 
-        {activeTab === 'admin-pagos' && <PaymentValidation adminId={currentUser?.id} />}
+        {resolvedActiveTab === 'admin-pagos' && <PaymentValidation adminId={currentUser?.id} />}
 
-        {activeTab === 'admin-asistencias' && (
+        {resolvedActiveTab === 'admin-asistencias' && verticalConfig.enableAsistenciasQR && (
           <>
             <AdminSectionBanner
-              title="Control de Asistencias"
-              description="Valida códigos QR en recepción y registra el ingreso de alumnos por clase."
+              title={verticalConfig.navAsistenciasLabel}
+              description={`Valida códigos QR en recepción y registra el ingreso de ${verticalConfig.clientePlural.toLowerCase()} por ${verticalConfig.sesionSingular.toLowerCase()}.`}
             />
             <CalendarView />
           </>
         )}
 
-        {activeTab === 'admin-bicicletas' && (
+        {resolvedActiveTab === 'admin-bicicletas' && verticalConfig.showBicycleMap && (
           <>
             <AdminSectionBanner
-              title="Flota de 15 Bicicletas"
-              description="Monitorea la disposición de puestos, ocupación en tiempo real y estado de sala."
+              title={`Flota de ${estudioActivo?.capacidad_sala || 15} ${verticalConfig.recursoPlural}`}
+              description={`Monitorea la disposición de ${verticalConfig.recursoCortoPlural}, ocupación en tiempo real y estado de ${verticalConfig.espacio.toLowerCase()}.`}
             />
             <IndoorBikeMap
               currentUser={currentUser}
@@ -368,14 +502,24 @@ function MainApp() {
           </>
         )}
 
-        {activeTab === 'admin-caja' && (
+        {resolvedActiveTab === 'admin-canchas' && verticalConfig.showCourtManagement && (
+          <>
+            <AdminSectionBanner
+              title="Gestión de Canchas"
+              description="Administra la disponibilidad de canchas, turnos programados y ocupación por horario."
+            />
+            <CalendarView />
+          </>
+        )}
+
+        {resolvedActiveTab === 'admin-caja' && (
           <CashRegister
             responsableNombre={currentUser?.nombre_completo || 'Administrador General'}
             usuarioId={currentUser?.id || null}
           />
         )}
 
-        {activeTab === 'admin-branding' && <BrandSettingsView />}
+        {resolvedActiveTab === 'admin-branding' && <BrandSettingsView />}
       </Suspense>
     </SidebarLayout>
   )

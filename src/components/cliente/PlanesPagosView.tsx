@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/use-toast'
-import { useBranding } from '@/context/BrandingContext'
+import { useBranding, getConfiguracionVertical } from '@/context/BrandingContext'
 import { pagosService } from '@/services/pagosService'
 import type { Tables, MetodoPago } from '@/types/database'
 
@@ -34,7 +34,8 @@ export const PlanesPagosView: React.FC<PlanesPagosViewProps> = ({
   onVolver,
   onPagoCompletado,
 }) => {
-  const { currentPalette, empresaId, studioName } = useBranding()
+  const { currentPalette, empresaId, studioName, estudioActivo } = useBranding()
+  const verticalConfig = getConfiguracionVertical(estudioActivo?.tipo_negocio)
 
   // Estados de catálogo y selección
   const [planes, setPlanes] = useState<Tables<'planes'>[]>([])
@@ -268,16 +269,20 @@ export const PlanesPagosView: React.FC<PlanesPagosViewProps> = ({
               <span>Volver a Mi Dashboard</span>
             </button>
           )}
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
-              Comprar Clases y Tiqueteras
+              Comprar {verticalConfig.navPlanesLabel}
             </h1>
             <Badge variant="secondary" className="text-xs">
               {studioName}
             </Badge>
+            <Badge variant="outline" className="text-xs font-semibold">
+              {verticalConfig.etiquetaNegocio}
+            </Badge>
           </div>
           <p className="text-sm text-muted-foreground">
-            Adquiere paquetes de créditos para reservar tus bicicletas en cualquiera de nuestras sesiones.
+            Adquiere paquetes para reservar tus {verticalConfig.recursoCortoPlural} en cualquiera de nuestras{' '}
+            {verticalConfig.sesionPlural.toLowerCase()}.
           </p>
         </div>
 
@@ -313,7 +318,8 @@ export const PlanesPagosView: React.FC<PlanesPagosViewProps> = ({
               1. Selecciona tu Paquete de Clases
             </h2>
             <p className="text-xs text-muted-foreground">
-              Cada crédito equivale a 1 puesto de bicicleta reservado en una sesión de indoor cycling.
+              Cada crédito equivale a 1 reserva de {verticalConfig.recursoSingular.toLowerCase()} en{' '}
+              {verticalConfig.espacio.toLowerCase()}.
             </p>
           </div>
         </div>

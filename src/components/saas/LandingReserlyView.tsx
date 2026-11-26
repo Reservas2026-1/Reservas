@@ -12,7 +12,8 @@ import {
   Clock,
   Sparkles,
   Check,
-  ChevronRight,
+  ChevronUp,
+  ChevronDown,
   X,
   Activity,
   Layers,
@@ -27,6 +28,8 @@ import {
 import { useBranding } from '@/context/BrandingContext'
 import { AuthView } from '@/components/auth/AuthView'
 import type { Tables } from '@/types/database'
+import { ReserlyModulesViewer } from './ReserlyModulesViewer'
+import { ReserlyImpactBento } from './ReserlyImpactBento'
 
 interface LandingReserlyViewProps {
   onAuthSuccess: (userProfile: Tables<'perfiles'> | null) => void
@@ -66,7 +69,7 @@ const VERTICALES: VerticalItem[] = [
     icon: Activity,
     previewSummary:
       'Mapa interactivo de sala 3x5 de bicicletas numeradas, control de potencia, cadencia y selección de asiento en tiempo real.',
-    highlightMetric: '15 Bicis en tiempo real',
+    highlightMetric: 'Bicis en tiempo real',
     features: [
       {
         title: 'Mapa interactivo de sala 3x5',
@@ -242,6 +245,7 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
   const [authInitialMode, setAuthInitialMode] = useState<'signin' | 'register-studio'>('signin')
   const [authInitialRubro, setAuthInitialRubro] = useState<string | undefined>(undefined)
   const [selectedRubro, setSelectedRubro] = useState<VerticalRubro>('spinning')
+  const [isVerticalPanelOpen, setIsVerticalPanelOpen] = useState<boolean>(true)
   const [contactSent, setContactSent] = useState(false)
   const [contactName, setContactName] = useState('')
   const [contactEmail, setContactEmail] = useState('')
@@ -251,6 +255,15 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
 
   const activeVertical =
     VERTICALES.find((v) => v.id === selectedRubro) || VERTICALES[0]
+
+  const handleSelectRubro = (rubroId: VerticalRubro) => {
+    if (selectedRubro === rubroId) {
+      setIsVerticalPanelOpen((prev) => !prev)
+    } else {
+      setSelectedRubro(rubroId)
+      setIsVerticalPanelOpen(true)
+    }
+  }
 
   useEffect(() => {
     const sectionIds = ['inicio', 'funciones', 'precios', 'nosotros', 'contacto']
@@ -338,11 +351,10 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                   key={link.id}
                   type="button"
                   onClick={() => scrollTo(link.id)}
-                  className={`transition-colors cursor-pointer pb-1 ${
-                    isActive
-                      ? 'border-b-2 border-red-600 text-red-600 font-semibold'
-                      : 'border-b-2 border-transparent text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 font-medium'
-                  }`}
+                  className={`transition-colors cursor-pointer pb-1 ${isActive
+                    ? 'border-b-2 border-red-600 text-red-600 font-semibold'
+                    : 'border-b-2 border-transparent text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 font-medium'
+                    }`}
                 >
                   {link.label}
                 </button>
@@ -526,125 +538,164 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                   <button
                     key={rubro.id}
                     type="button"
-                    onClick={() => setSelectedRubro(rubro.id)}
-                    className={`relative rounded-2xl overflow-hidden border-2 text-left transition-all duration-200 group flex flex-col cursor-pointer ${
-                      isSelected
-                        ? 'border-red-600 ring-2 ring-red-600/40 shadow-lg scale-[1.03] bg-white dark:bg-slate-800'
-                        : 'border-slate-200 dark:border-slate-800 hover:border-red-300 dark:hover:border-red-800/60 bg-white/70 dark:bg-slate-900/70 hover:scale-[1.01]'
-                    }`}
+                    onClick={() => handleSelectRubro(rubro.id)}
+                    aria-expanded={isSelected && isVerticalPanelOpen}
+                    className={`relative h-52 sm:h-60 w-full rounded-3xl overflow-hidden border-2 text-left transition-all duration-300 group cursor-pointer ${isSelected
+                        ? 'border-red-600 ring-2 ring-red-600/40 shadow-xl scale-[1.03]'
+                        : 'border-slate-200/80 dark:border-slate-800 hover:border-red-400 dark:hover:border-red-700 hover:scale-[1.01] shadow-md'
+                      }`}
                   >
-                    <div className="relative h-28 sm:h-36 w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
-                      <img
-                        src={rubro.image}
-                        alt={rubro.title}
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-                      <div className="absolute bottom-2 left-2 right-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-white bg-red-600/90 px-1.5 py-0.5 rounded">
-                          {rubro.badge.split(' ')[0]}
+                    <img
+                      src={rubro.image}
+                      alt={rubro.title}
+                      className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    />
+                    {/* Degradado oscuro inferior para contraste óptimo */}
+                    <div
+                      className={`absolute inset-0 bg-gradient-to-t transition-opacity duration-300 ${isSelected
+                          ? 'from-slate-950/95 via-slate-950/50 to-black/15'
+                          : 'from-slate-950/90 via-slate-950/45 to-black/10 group-hover:from-slate-950/95'
+                        }`}
+                    />
+
+                    {/* Etiqueta superior de categoría */}
+                    <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-2 z-10">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-white bg-red-600/90 backdrop-blur-xs px-2 py-0.5 rounded-full shadow-xs">
+                        {rubro.badge.split(' ')[0]}
+                      </span>
+                      {isSelected && (
+                        <span className="w-5 h-5 rounded-full bg-red-600 text-white flex items-center justify-center shadow-sm">
+                          <Check className="w-3 h-3 stroke-[3]" />
                         </span>
-                      </div>
+                      )}
                     </div>
-                    <div className="p-3 flex-1 flex flex-col justify-between">
-                      <p className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white leading-tight">
+
+                    {/* Contenido inferior y píldora flotante "Ver módulo →" */}
+                    <div className="absolute inset-x-0 bottom-0 p-3.5 sm:p-4 flex flex-col justify-end gap-2.5 z-10">
+                      <p className="font-bold text-xs sm:text-sm text-white leading-snug drop-shadow-xs">
                         {rubro.title}
                       </p>
-                      <span
-                        className={`text-[11px] font-semibold mt-2 inline-flex items-center gap-1 ${
-                          isSelected
-                            ? 'text-red-600 dark:text-red-400'
-                            : 'text-slate-400 dark:text-slate-500'
-                        }`}
-                      >
-                        {isSelected ? 'Seleccionado' : 'Ver funciones'}
-                        <ChevronRight className="w-3 h-3" />
-                      </span>
+                      <div>
+                        <span
+                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-bold transition-all duration-200 shadow-md ${isSelected
+                              ? 'bg-white text-red-600 ring-2 ring-red-500 shadow-red-600/30 translate-x-0.5'
+                              : 'bg-white/95 text-slate-900 group-hover:bg-white group-hover:text-red-600 group-hover:ring-2 group-hover:ring-red-400/70 group-hover:shadow-lg group-hover:translate-x-0.5'
+                            }`}
+                        >
+                          Ver módulo →
+                        </span>
+                      </div>
                     </div>
                   </button>
                 )
               })}
             </div>
 
-            {/* Panel dinámico interactivo con las características de la vertical seleccionada */}
-            <div className="mt-8 rounded-3xl border-2 border-red-500/30 dark:border-red-600/40 bg-white dark:bg-slate-900 p-6 sm:p-10 shadow-xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-80 h-80 bg-red-500/5 dark:bg-red-600/10 rounded-full blur-3xl pointer-events-none" />
+            {/* Panel dinámico colapsable con las características de la vertical seleccionada */}
+            {isVerticalPanelOpen ? (
+              <div className="mt-8 rounded-3xl border-2 border-red-500/30 dark:border-red-600/40 bg-white dark:bg-slate-900 p-6 sm:p-10 shadow-xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-80 h-80 bg-red-500/5 dark:bg-red-600/10 rounded-full blur-3xl pointer-events-none" />
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-                <div className="lg:col-span-8 space-y-6">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="px-3 py-1 rounded-full bg-red-600 text-white text-xs font-bold uppercase tracking-wider">
-                      {activeVertical.badge}
-                    </span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                      Especializado para: {activeVertical.title}
-                    </span>
-                  </div>
-
-                  <div>
-                    <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white">
-                      {activeVertical.title}
-                    </h3>
-                    <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 mt-2">
-                      {activeVertical.previewSummary}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                    {activeVertical.features.map((feat, idx) => (
-                      <div
-                        key={idx}
-                        className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 flex items-start gap-3"
-                      >
-                        <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0 mt-0.5">
-                          <Check className="w-4 h-4 stroke-[2.5]" />
-                        </div>
-                        <div>
-                          <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
-                            {feat.title}
-                          </p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
-                            {feat.description}
-                          </p>
-                        </div>
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                  <div className="lg:col-span-8 space-y-6">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="px-3 py-1 rounded-full bg-red-600 text-white text-xs font-bold uppercase tracking-wider">
+                          {activeVertical.badge}
+                        </span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                          Especializado para: {activeVertical.title}
+                        </span>
                       </div>
-                    ))}
-                  </div>
 
-                  <div className="pt-4 flex flex-col sm:flex-row items-center gap-4">
-                    <button
-                      type="button"
-                      onClick={() => openAuthModal('register-studio', activeVertical.title)}
-                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-bold shadow-md shadow-red-600/20 transition-all cursor-pointer"
-                    >
-                      <Rocket className="w-4 h-4" />
-                      <span>Configurar Reserly para {activeVertical.title.split('/')[0].trim()}</span>
-                    </button>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                      Incluye plantilla precargada y catálogo listo para personalizar.
-                    </span>
-                  </div>
-                </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsVerticalPanelOpen(false)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                      >
+                        <span>Ocultar detalle</span>
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
 
-                <div className="lg:col-span-4 flex justify-center">
-                  <div className="relative w-full max-w-sm rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xl group">
-                    <img
-                      src={activeVertical.image}
-                      alt={activeVertical.title}
-                      className="w-full h-72 sm:h-80 object-cover transform transition duration-500 group-hover:scale-105"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent flex flex-col justify-end p-5">
-                      <span className="text-xs font-medium text-red-400">
-                        {activeVertical.badge}
-                      </span>
-                      <p className="text-lg font-bold text-white">
-                        {activeVertical.highlightMetric}
+                    <div>
+                      <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white">
+                        {activeVertical.title}
+                      </h3>
+                      <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 mt-2">
+                        {activeVertical.previewSummary}
                       </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                      {activeVertical.features.map((feat, idx) => (
+                        <div
+                          key={idx}
+                          className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 flex items-start gap-3"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0 mt-0.5">
+                            <Check className="w-4 h-4 stroke-[2.5]" />
+                          </div>
+                          <div>
+                            <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                              {feat.title}
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                              {feat.description}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="pt-4 flex flex-col sm:flex-row items-center gap-4">
+                      <button
+                        type="button"
+                        onClick={() => openAuthModal('register-studio', activeVertical.title)}
+                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-bold shadow-md shadow-red-600/20 transition-all cursor-pointer"
+                      >
+                        <Rocket className="w-4 h-4" />
+                        <span>Configurar Reserly para {activeVertical.title.split('/')[0].trim()}</span>
+                      </button>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        Incluye plantilla precargada y catálogo listo para personalizar.
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="lg:col-span-4 flex justify-center">
+                    <div className="relative w-full max-w-sm rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xl group">
+                      <img
+                        src={activeVertical.image}
+                        alt={activeVertical.title}
+                        className="w-full h-72 sm:h-80 object-cover transform transition duration-500 group-hover:scale-105"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent flex flex-col justify-end p-5">
+                        <span className="text-xs font-medium text-red-400">
+                          {activeVertical.badge}
+                        </span>
+                        <p className="text-lg font-bold text-white">
+                          {activeVertical.highlightMetric}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="mt-6 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setIsVerticalPanelOpen(true)}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full border border-red-200 dark:border-red-900/60 bg-white dark:bg-slate-900 text-xs sm:text-sm font-bold text-red-600 dark:text-red-400 shadow-sm hover:shadow-md transition-all cursor-pointer"
+                >
+                  <span>
+                    Ver módulo de {activeVertical.title.split('/')[0].trim()}
+                  </span>
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+              </div>
+            )}
 
             {/* 4 Tarjetas horizontales de Beneficios Clave */}
             <div className="mt-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -720,52 +771,10 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
               </p>
             </div>
 
-            {/* 4 Vistas previas del sistema con imágenes ampliadas y diseño minimalista sin recuadros */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8 mb-20">
-              <div className="flex flex-col items-center">
-                <img
-                  src={encodeURI('/Panel admin.png')}
-                  alt="Panel de administración"
-                  className="w-full h-44 sm:h-48 object-contain rounded-xl shadow-sm mb-3"
-                />
-                <h4 className="font-bold text-center text-sm sm:text-base text-foreground">
-                  Panel de administración
-                </h4>
-              </div>
-
-              <div className="flex flex-col items-center">
-                <img
-                  src="/Calendario.png"
-                  alt="Calendario de reservas"
-                  className="w-full h-44 sm:h-48 object-contain rounded-xl shadow-sm mb-3"
-                />
-                <h4 className="font-bold text-center text-sm sm:text-base text-foreground">
-                  Calendario de reservas
-                </h4>
-              </div>
-
-              <div className="flex flex-col items-center">
-                <img
-                  src="/Reservas.png"
-                  alt="Lista de reservas"
-                  className="w-full h-44 sm:h-48 object-contain rounded-xl shadow-sm mb-3"
-                />
-                <h4 className="font-bold text-center text-sm sm:text-base text-foreground">
-                  Lista de reservas
-                </h4>
-              </div>
-
-              <div className="flex flex-col items-center">
-                <img
-                  src="/Clientes.png"
-                  alt="Gestión de clientes"
-                  className="w-full h-44 sm:h-48 object-contain rounded-xl shadow-sm mb-3"
-                />
-                <h4 className="font-bold text-center text-sm sm:text-base text-foreground">
-                  Gestión de clientes
-                </h4>
-              </div>
-            </div>
+            {/* Visor interactivo ampliado con 5 pestañas de módulos del sistema */}
+            <ReserlyModulesViewer
+              onTryModule={() => openAuthModal('register-studio')}
+            />
 
             {/* 3 Pasos numerados limpios con círculos rojos #DC2626 conectados por flechas */}
             <div className="relative">
@@ -823,6 +832,11 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
             </div>
           </div>
         </section>
+
+        {/* =========================================================================
+            4B. FRANJA DE IMPACTO Y AUTOMATIZACIÓN (BENTO GRID)
+        ========================================================================= */}
+        <ReserlyImpactBento />
 
         {/* =========================================================================
             5. SECCIÓN "PRECIOS" (id="precios")
@@ -1257,18 +1271,18 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs overflow-y-auto"
+          className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-start justify-center p-4 sm:py-8"
           onClick={() => setIsAuthOpen(false)}
         >
           <div
-            className="w-full max-w-lg mx-auto bg-card rounded-2xl shadow-2xl border border-border p-0 overflow-hidden relative my-8"
+            className="w-full max-w-lg bg-card rounded-2xl shadow-2xl border border-border p-0 overflow-hidden relative my-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Botón cerrar modal */}
             <button
               type="button"
               onClick={() => setIsAuthOpen(false)}
-              className="absolute top-4 right-4 z-20 p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+              className="absolute top-3.5 right-3.5 z-20 p-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
               aria-label="Cerrar modal"
             >
               <X className="w-4 h-4" />
@@ -1278,6 +1292,7 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
             <AuthView
               initialMode={authInitialMode}
               initialRubro={authInitialRubro}
+              onClose={() => setIsAuthOpen(false)}
               onAuthSuccess={(profile) => {
                 setIsAuthOpen(false)
                 onAuthSuccess(profile)

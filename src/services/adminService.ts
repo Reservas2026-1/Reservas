@@ -863,6 +863,12 @@ export const adminService = {
         return { data: null, error: error.message }
       }
 
+      const capacidadObjetivo = claseCreada.capacidad || data.capacidad || 15
+      const bicisRes = await clasesService.ensureBicicletasForEmpresa(data.empresaId, capacidadObjetivo)
+      if (bicisRes.error) {
+        console.warn('No se pudieron sincronizar las bicicletas al crear la clase:', bicisRes.error)
+      }
+
       return { data: claseCreada, error: null }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al crear la clase'

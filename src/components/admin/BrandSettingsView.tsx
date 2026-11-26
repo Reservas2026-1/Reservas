@@ -18,12 +18,13 @@ import {
   Check,
   Eye,
   Flame,
+  LayoutGrid,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { useBranding, PALETTES } from '@/context/BrandingContext'
+import { useBranding, PALETTES, getConfiguracionVertical } from '@/context/BrandingContext'
 import { empresasService, type ActualizarConfiguracionEstudioParams } from '@/services/empresasService'
 
 export const BrandSettingsView: React.FC = () => {
@@ -42,11 +43,12 @@ export const BrandSettingsView: React.FC = () => {
   } = useBranding()
 
   // Estados locales para el formulario de configuración
-  const [nombre, setNombre] = useState(studioName || 'VELO-X Cycling Studio')
+  const [nombre, setNombre] = useState(studioName || 'Mi Estudio')
+  const verticalConfig = getConfiguracionVertical(estudioActivo?.tipo_negocio)
   const [colorPrimario, setColorPrimario] = useState(customPrimaryHex || currentPalette.primaryHex || '#DC2626')
   const [capacidadSala, setCapacidadSala] = useState<number>(estudioActivo?.capacidad_sala || 15)
   const [telefono, setTelefono] = useState<string>(estudioActivo?.telefono || '+57 310 123 4567')
-  const [email, setEmail] = useState<string>(estudioActivo?.email || 'contacto@veloxcycling.com')
+  const [email, setEmail] = useState<string>(estudioActivo?.email || 'contacto@estudio.com')
   const [direccion, setDireccion] = useState<string>(
     estudioActivo?.direccion || 'Calle 85 # 12-40, Zona Rosa, Bogotá'
   )
@@ -200,11 +202,14 @@ export const BrandSettingsView: React.FC = () => {
             Configuración de Marca Blanca
           </h1>
           <p className="text-xs text-muted-foreground">
-            Ajusta los colores, logotipo y datos corporativos que verán tus ciclistas tanto en la app web como en el smartphone móvil.
+            Ajusta los colores, logotipo y datos corporativos que verán tus {verticalConfig.clientePlural.toLowerCase()} tanto en la app web como en el smartphone móvil.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="text-xs font-semibold">
+            {verticalConfig.etiquetaNegocio}
+          </Badge>
           <Badge variant="outline" className="text-xs font-mono">
             Tenant ID: {empresaId.substring(0, 12)}...
           </Badge>
@@ -265,7 +270,7 @@ export const BrandSettingsView: React.FC = () => {
                     required
                     value={nombre}
                     onChange={(e) => setNombre(e.target.value)}
-                    placeholder="Ej. VELO-X Cycling Studio"
+                    placeholder="Ej. Studio Velox"
                     className="text-xs font-medium"
                   />
                 </div>
@@ -294,7 +299,7 @@ export const BrandSettingsView: React.FC = () => {
                         />
                       ) : (
                         <div className="text-center text-muted-foreground">
-                          <Bike className="w-8 h-8 mx-auto opacity-30" />
+                          {verticalConfig.showBicycleMap ? <Bike className="w-8 h-8 mx-auto opacity-30" /> : <LayoutGrid className="w-8 h-8 mx-auto opacity-30" />}
                           <span className="text-[9px] block mt-1">Sin Logo</span>
                         </div>
                       )}
@@ -437,11 +442,11 @@ export const BrandSettingsView: React.FC = () => {
                 <div className="space-y-1.5 pt-2 border-t">
                   <div className="flex items-center justify-between">
                     <label className="font-semibold text-foreground flex items-center gap-1.5">
-                      <Bike className="w-3.5 h-3.5 text-muted-foreground" />
-                      <span>Capacidad de Sala (Bicicletas Indoor)</span>
+                      {verticalConfig.showBicycleMap ? <Bike className="w-3.5 h-3.5 text-muted-foreground" /> : <LayoutGrid className="w-3.5 h-3.5 text-muted-foreground" />}
+                      <span>Capacidad de {verticalConfig.espacio} ({verticalConfig.recursoPlural})</span>
                     </label>
                     <Badge variant="secondary" className="font-mono text-xs">
-                      {capacidadSala} Bicis
+                      {capacidadSala} {verticalConfig.recursoPlural}
                     </Badge>
                   </div>
                   <Input
@@ -453,7 +458,8 @@ export const BrandSettingsView: React.FC = () => {
                     className="text-xs font-medium"
                   />
                   <span className="text-[10px] text-muted-foreground block">
-                    Por diseño estándar, las salas de ciclismo de este software están optimizadas para 15 puestos (3 filas de 5).
+                    Define la cantidad máxima de {verticalConfig.recursoCortoPlural} disponibles por{' '}
+                    {verticalConfig.sesionSingular.toLowerCase()} en tu {verticalConfig.espacio.toLowerCase()}.
                   </span>
                 </div>
 
@@ -546,7 +552,8 @@ export const BrandSettingsView: React.FC = () => {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Así es exactamente como se refleja tu paleta de marca y logotipo en la pantalla del celular de tus alumnos:
+            Así es exactamente como se refleja tu paleta de marca y logotipo en la pantalla del celular de tus{' '}
+            {verticalConfig.clientePlural.toLowerCase()}:
           </p>
 
           {/* Marco Smartphone (iPhone / Android) */}
@@ -579,13 +586,13 @@ export const BrandSettingsView: React.FC = () => {
                       className="max-h-full max-w-full object-contain"
                     />
                   ) : (
-                    <Bike className="w-8 h-8 text-white" />
+                    verticalConfig.showBicycleMap ? <Bike className="w-8 h-8 text-white" /> : <LayoutGrid className="w-8 h-8 text-white" />
                   )}
                 </div>
 
                 <div>
                   <h3 className="text-lg font-black tracking-tight leading-tight px-2 text-white">
-                    {nombre || 'Mi Estudio Cycling'}
+                    {nombre || `Mi ${verticalConfig.espacio}`}
                   </h3>
                   <div className="inline-flex items-center gap-1 text-[10px] text-slate-300 mt-1">
                     <MapPin className="w-2.5 h-2.5" />
@@ -599,7 +606,7 @@ export const BrandSettingsView: React.FC = () => {
                     className="text-[10px] font-bold px-2.5 py-0.5 rounded-full text-white shadow-xs uppercase tracking-wider"
                     style={{ backgroundColor: colorPrimario }}
                   >
-                    Sala de {capacidadSala} Puestos
+                    {verticalConfig.espacio} de {capacidadSala} {verticalConfig.recursoPlural}
                   </span>
                 </div>
               </div>
@@ -610,7 +617,7 @@ export const BrandSettingsView: React.FC = () => {
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="font-bold text-white flex items-center gap-1">
                       <Flame className="w-3.5 h-3.5" style={{ color: colorPrimario }} />
-                      Power Spin & Beats
+                      {verticalConfig.ejemploSesion}
                     </span>
                     <span className="font-mono text-[10px] text-slate-400">18:30 hrs</span>
                   </div>
@@ -657,16 +664,16 @@ export const BrandSettingsView: React.FC = () => {
                   className="w-full py-2.5 px-4 rounded-xl text-xs font-black text-white shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-1.5"
                   style={{ backgroundColor: colorPrimario }}
                 >
-                  <Bike className="w-3.5 h-3.5" />
-                  <span>Reservar Bici #4 Ahora</span>
+                  {verticalConfig.showBicycleMap ? <Bike className="w-3.5 h-3.5" /> : <LayoutGrid className="w-3.5 h-3.5" />}
+                  <span>Reservar {verticalConfig.recursoSingular} #4 Ahora</span>
                 </button>
               </div>
 
               {/* Barra inferior de navegación del móvil */}
               <div className="pt-2 border-t border-white/10 flex items-center justify-around text-slate-400 text-[10px]">
                 <div className="flex flex-col items-center gap-0.5" style={{ color: colorPrimario }}>
-                  <Bike className="w-3.5 h-3.5" />
-                  <span className="text-[9px] font-bold">Bicis</span>
+                  {verticalConfig.showBicycleMap ? <Bike className="w-3.5 h-3.5" /> : <LayoutGrid className="w-3.5 h-3.5" />}
+                  <span className="text-[9px] font-bold">{verticalConfig.recursoPlural}</span>
                 </div>
                 <div className="flex flex-col items-center gap-0.5 text-slate-500">
                   <Sparkles className="w-3.5 h-3.5" />

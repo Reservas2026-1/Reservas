@@ -17,12 +17,13 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/use-toast'
-import { useBranding } from '@/context/BrandingContext'
+import { useBranding, getConfiguracionVertical } from '@/context/BrandingContext'
 import { adminService } from '@/services/adminService'
 import type { Tables } from '@/types/database'
 
 export const PlanesAdminView: React.FC = () => {
-  const { currentPalette, empresaId, studioName } = useBranding()
+  const { currentPalette, empresaId, studioName, estudioActivo } = useBranding()
+  const verticalConfig = getConfiguracionVertical(estudioActivo?.tipo_negocio)
 
   const [planes, setPlanes] = useState<Tables<'planes'>[]>([])
   const [loading, setLoading] = useState<boolean>(true)
@@ -239,14 +240,18 @@ export const PlanesAdminView: React.FC = () => {
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
               <Package className={`w-6 h-6 ${currentPalette.textClass}`} />
-              <span>Gestión de Planes y Paquetes</span>
+              <span>Gestión de {verticalConfig.navPlanesLabel}</span>
             </h1>
             <Badge variant="outline" className="text-xs font-mono">
               {studioName}
             </Badge>
+            <Badge variant="secondary" className="text-xs font-semibold">
+              {verticalConfig.etiquetaNegocio}
+            </Badge>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Crea, edita, activa/desactiva o elimina los planes de clases y créditos del estudio.
+            Crea, edita, activa/desactiva o elimina los planes de {verticalConfig.sesionPlural.toLowerCase()} y créditos de{' '}
+            {verticalConfig.espacio.toLowerCase()}.
           </p>
         </div>
 
@@ -423,7 +428,7 @@ export const PlanesAdminView: React.FC = () => {
                 <div className="space-y-1">
                   <label className="font-bold text-foreground">Descripción</label>
                   <Input
-                    placeholder="Ej: Válido para todas las sesiones indoor"
+                    placeholder={`Ej: Válido para todas las ${verticalConfig.sesionPlural.toLowerCase()} en ${verticalConfig.espacio.toLowerCase()}`}
                     value={formPlan.descripcion}
                     onChange={(e) => setFormPlan({ ...formPlan, descripcion: e.target.value })}
                   />
@@ -442,7 +447,11 @@ export const PlanesAdminView: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="font-bold text-foreground">Créditos / Clases</label>
+                    <label className="font-bold text-foreground">
+                      {verticalConfig.enableTiqueteras
+                        ? `Créditos / ${verticalConfig.sesionPlural}`
+                        : `Cantidad de ${verticalConfig.sesionPlural}`}
+                    </label>
                     <Input
                       type="number"
                       min={1}

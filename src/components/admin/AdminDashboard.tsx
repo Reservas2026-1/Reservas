@@ -18,12 +18,13 @@ import {
   Banknote,
   Package,
   AlertCircle,
+  LayoutGrid,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/use-toast'
-import { useBranding } from '@/context/BrandingContext'
+import { useBranding, getConfiguracionVertical } from '@/context/BrandingContext'
 import { IncomeBarChart } from '@/components/admin/IncomeBarChart'
 import {
   adminService,
@@ -82,7 +83,10 @@ const emptyExtendedStats: ExtendedDashboardStats = {
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab }) => {
-  const { currentPalette, empresaId, studioName } = useBranding()
+  const { currentPalette, empresaId, studioName, estudioActivo } = useBranding()
+  const verticalConfig = getConfiguracionVertical(estudioActivo?.tipo_negocio)
+  const sesionMasculina = ['Turno', 'WOD'].includes(verticalConfig.sesionSingular)
+  const capacidadEstudio = estudioActivo?.capacidad_sala || 15
 
   const [metricas, setMetricas] = useState<DashboardMetricas>(emptyMetricas)
   const [extendedStats, setExtendedStats] = useState<ExtendedDashboardStats>(emptyExtendedStats)
@@ -230,9 +234,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
             <Badge variant="secondary" className="text-xs font-mono">
               {studioName}
             </Badge>
+            <Badge variant="outline" className="text-xs font-semibold">
+              {verticalConfig.etiquetaNegocio}
+            </Badge>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Monitoreo en tiempo real de reservas, clientes, ocupación de sala, pagos verificados y planes.
+            Monitoreo en tiempo real de reservas, {verticalConfig.clientePlural.toLowerCase()}, ocupación de{' '}
+            {verticalConfig.espacio.toLowerCase()}, pagos verificados y planes.
           </p>
         </div>
 
@@ -293,7 +301,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
                   {extendedStats.totalReservasMes}
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  Cupos reservados en sesiones del mes
+                  Cupos reservados en {verticalConfig.sesionPlural.toLowerCase()} del mes
                 </p>
               </>
             )}
@@ -305,7 +313,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
           <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-500" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Clientes
+              {verticalConfig.clientePlural}
             </CardTitle>
             <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-600 flex items-center justify-center">
               <Users className="w-4 h-4" />
@@ -320,19 +328,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
                   {metricas.totalClientesActivos}
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  Ciclistas activos registrados
+                  {verticalConfig.clientePlural} activos registrados
                 </p>
               </>
             )}
           </CardContent>
         </Card>
 
-        {/* KPI 3: Clases programadas */}
+        {/* KPI 3: Sesiones programadas */}
         <Card className="relative overflow-hidden border-border/80 shadow-sm">
           <div className="absolute top-0 left-0 right-0 h-1 bg-amber-500" />
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Clases Programadas
+              {verticalConfig.sesionPlural} {sesionMasculina ? 'Programados' : 'Programadas'}
             </CardTitle>
             <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center">
               <Calendar className="w-4 h-4" />
@@ -347,7 +355,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
                   {metricas.totalClasesActivas}
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  Sesiones activas desde hoy
+                  {verticalConfig.sesionPlural} activ{sesionMasculina ? 'os' : 'as'} desde hoy
                 </p>
               </>
             )}
@@ -362,7 +370,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
               % Ocupación del Mes
             </CardTitle>
             <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 flex items-center justify-center">
-              <Bike className="w-4 h-4" />
+              {verticalConfig.showBicycleMap ? (
+                <Bike className="w-4 h-4" />
+              ) : (
+                <LayoutGrid className="w-4 h-4" />
+              )}
             </div>
           </CardHeader>
           <CardContent>
@@ -487,8 +499,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
                   {extendedStats.planesActivosCount} activos
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  {extendedStats.tiqueterasActivasCount} tiqueteras vigentes •{' '}
-                  <strong>{formatCOP(extendedStats.ingresosPlanesTotal)}</strong>
+                  {verticalConfig.enableTiqueteras
+                    ? `${extendedStats.tiqueterasActivasCount} tiqueteras vigentes`
+                    : `${extendedStats.pagosVerificadosCount} pagos de servicios`}{' '}
+                  • <strong>{formatCOP(extendedStats.ingresosPlanesTotal)}</strong>
                 </p>
               </>
             )}
@@ -505,11 +519,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
           <CardHeader className="flex flex-row items-center justify-between p-5 pb-3 border-b">
             <div>
               <CardTitle className="text-base flex items-center gap-2">
-                <Bike className={`w-4 h-4 ${currentPalette.textClass}`} />
-                Clases y Ocupación de las 15 Bicicletas
+                {verticalConfig.showBicycleMap ? (
+                  <Bike className={`w-4 h-4 ${currentPalette.textClass}`} />
+                ) : (
+                  <LayoutGrid className={`w-4 h-4 ${currentPalette.textClass}`} />
+                )}
+                {verticalConfig.sesionPlural} y Ocupación de {capacidadEstudio} {verticalConfig.recursoPlural}
               </CardTitle>
               <CardDescription className="text-xs">
-                Sesiones programadas vigentes y disponibilidad de cupos en vivo.
+                {verticalConfig.sesionPlural} programad{sesionMasculina ? 'os' : 'as'} vigentes y disponibilidad de cupos en vivo.
               </CardDescription>
             </div>
             {onNavigateTab && (
@@ -533,7 +551,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
             ) : clases.length === 0 ? (
               <div className="p-8 text-center text-xs text-muted-foreground space-y-2">
                 <Calendar className="w-8 h-8 mx-auto opacity-30" />
-                <p>No hay clases activas programadas desde hoy en la base de datos.</p>
+                <p>
+                  No hay {verticalConfig.sesionPlural.toLowerCase()} activ{sesionMasculina ? 'os' : 'as'} programad
+                  {sesionMasculina ? 'os' : 'as'} desde hoy en la base de datos.
+                </p>
                 {onNavigateTab && (
                   <Button
                     type="button"
@@ -542,7 +563,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
                     onClick={() => onNavigateTab('admin-calendario')}
                     className="text-xs"
                   >
-                    Ir a Horarios y Clases
+                    Ir a {verticalConfig.navHorariosLabel}
                   </Button>
                 )}
               </div>
@@ -583,14 +604,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
                             {clase.hora_inicio?.slice(0, 5)} - {clase.hora_fin?.slice(0, 5)} hrs
                           </span>
                           <span>•</span>
-                          <span>Capacidad: {capacidad} Puestos</span>
+                          <span>Capacidad: {capacidad} {verticalConfig.recursoPlural}</span>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-4 sm:text-right">
                         <div className="space-y-1 min-w-[110px]">
                           <div className="text-xs font-bold text-foreground">
-                            {ocupados} / {capacidad} bicis ({pct}%)
+                            {ocupados} / {capacidad} {verticalConfig.recursoCortoPlural} ({pct}%)
                           </div>
                           <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
                             <div
@@ -643,7 +664,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
                   variant="outline"
                 >
                   <Calendar className="w-4 h-4 text-blue-500" />
-                  <span>Horarios, Clases y Escáner QR</span>
+                  <span>{verticalConfig.navHorariosLabel} y Escáner QR</span>
                 </Button>
 
                 <Button
@@ -670,7 +691,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
                   variant="outline"
                 >
                   <Package className="w-4 h-4 text-amber-500" />
-                  <span>Gestión de Planes y Paquetes</span>
+                  <span>Gestión de {verticalConfig.navPlanesLabel}</span>
                 </Button>
 
                 <Button
@@ -690,7 +711,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
                   variant="outline"
                 >
                   <Users className="w-4 h-4 text-purple-500" />
-                  <span>Clientes y Tiqueteras</span>
+                  <span>
+                    {verticalConfig.enableTiqueteras
+                      ? `${verticalConfig.clientePlural} y Tiqueteras`
+                      : `Directorio de ${verticalConfig.clientePlural}`}
+                  </span>
                 </Button>
 
                 <Button
@@ -708,7 +733,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateTab })
             <div className="p-3 rounded-lg bg-muted/40 border text-[11px] text-muted-foreground space-y-1 mt-4">
               <div className="font-bold text-foreground">Regla de Bloqueo Concurrente:</div>
               <p>
-                Cada reserva ejecuta una transacción SQL con bloqueo en PostgreSQL, garantizando 0 sobre-reservas en la flota de 15 bicis.
+                Cada reserva ejecuta una transacción SQL con bloqueo en PostgreSQL, garantizando 0 sobre-reservas en{' '}
+                {capacidadEstudio} {verticalConfig.recursoCortoPlural}.
               </p>
             </div>
           </CardContent>

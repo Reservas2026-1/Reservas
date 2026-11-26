@@ -24,7 +24,11 @@ import {
 import { toast } from '@/components/ui/use-toast'
 import { useBranding } from '@/context/BrandingContext'
 import { HybridHourSelector } from '@/components/admin/HybridHourSelector'
-import { generarProgramacionMasiva, crearClaseEspecial } from '@/services/clasesService'
+import {
+  generarProgramacionMasiva,
+  crearClaseEspecial,
+  ensureBicicletasForEmpresa,
+} from '@/services/clasesService'
 import { adminService, type ClaseAdminDetalle } from '@/services/adminService'
 import type { Tables } from '@/types/database'
 
@@ -35,15 +39,16 @@ interface PlanificacionesViewProps {
 }
 
 export default function PlanificacionesView({ empresaId: propEmpresaId }: PlanificacionesViewProps) {
-  const { empresaId: ctxEmpresaId, currentPalette, studioName } = useBranding()
+  const { empresaId: ctxEmpresaId, currentPalette, studioName, estudioActivo, verticalConfig } = useBranding()
+  const sesionMasculina = ['Turno', 'WOD'].includes(verticalConfig.sesionSingular)
   const empresaId = propEmpresaId || ctxEmpresaId
 
   // Form masivo
   const [periodicidad, setPeriodicidad] = useState<'diaria' | 'semanal' | 'quincenal' | 'mensual'>('semanal')
   const [numClases, setNumClases] = useState<number>(7)
   const [fechaInicio, setFechaInicio] = useState<Date | undefined>(new Date())
-  const [tituloMasivo, setTituloMasivo] = useState<string>('Sesión Indoor Cycling')
-  const [capacidadMasiva, setCapacidadMasiva] = useState<number>(15)
+  const [tituloMasivo, setTituloMasivo] = useState<string>(verticalConfig.ejemploSesion)
+  const [capacidadMasiva, setCapacidadMasiva] = useState<number>(estudioActivo?.capacidad_sala || 15)
   const [horarioBaseId, setHorarioBaseId] = useState<string>('manual')
   const [horaInicioMasiva, setHoraInicioMasiva] = useState<string>('06:00')
   const [horaFinMasiva, setHoraFinMasiva] = useState<string>('06:45')
@@ -51,8 +56,12 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
 
   // Form clase especial
   const [especialFecha, setEspecialFecha] = useState<Date | undefined>(new Date())
-  const [especialTitulo, setEspecialTitulo] = useState<string>('Clase Especial')
-  const [especialCapacidad, setEspecialCapacidad] = useState<number>(15)
+  const [especialTitulo, setEspecialTitulo] = useState<string>(
+    `${verticalConfig.sesionSingular} Especial`
+  )
+  const [especialCapacidad, setEspecialCapacidad] = useState<number>(
+    estudioActivo?.capacidad_sala || 15
+  )
   const [especialHoraInicio, setEspecialHoraInicio] = useState<string>('18:00')
   const [especialHoraFin, setEspecialHoraFin] = useState<string>('18:45')
   const [creandoEspecial, setCreandoEspecial] = useState<boolean>(false)
@@ -106,6 +115,16 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
     }
   }, [empresaId])
 
+  const estudioCapacidadKey = `${estudioActivo?.id ?? ''}:${estudioActivo?.capacidad_sala ?? ''}`
+  const [prevEstudioCapacidadKey, setPrevEstudioCapacidadKey] = useState(estudioCapacidadKey)
+  if (estudioCapacidadKey !== prevEstudioCapacidadKey) {
+    setPrevEstudioCapacidadKey(estudioCapacidadKey)
+    if (estudioActivo?.capacidad_sala && estudioActivo.capacidad_sala > 0) {
+      setCapacidadMasiva(estudioActivo.capacidad_sala)
+      setEspecialCapacidad(estudioActivo.capacidad_sala)
+    }
+  }
+
   useEffect(() => {
     cargarHorariosYClases()
   }, [cargarHorariosYClases])
@@ -125,6 +144,7 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
     const fechaStr = fechaInicio
       ? fechaInicio.toISOString().split('T')[0]
       : new Date().toISOString().split('T')[0]
+    const capacidadObjetivo = capacidadMasiva || estudioActivo?.capacidad_sala || 15
 
     setGenerando(true)
     try {
@@ -137,7 +157,7 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
         horaInicio: `${horaInicioMasiva.slice(0, 5)}:00`,
         horaFin: `${horaFinMasiva.slice(0, 5)}:00`,
         titulo: tituloMasivo.trim() || undefined,
-        capacidad: capacidadMasiva || 15,
+        capacidad: capacidadObjetivo,
       })
 
       if (res.error) {
@@ -147,6 +167,11 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
           description: res.error,
         })
         return
+      }
+
+      const syncRes = await ensureBicicletasForEmpresa(empresaId, capacidadObjetivo)
+      if (syncRes.error) {
+        console.warn('No se pudieron sincronizar las bicicletas para la programación:', syncRes.error)
       }
 
       const count = res.data?.length || 0
@@ -171,6 +196,7 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
     const fechaStr = especialFecha
       ? especialFecha.toISOString().split('T')[0]
       : new Date().toISOString().split('T')[0]
+    const capacidadObjetivo = especialCapacidad || estudioActivo?.capacidad_sala || 15
 
     setCreandoEspecial(true)
     try {
@@ -180,7 +206,7 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
         horaInicio: `${especialHoraInicio.slice(0, 5)}:00`,
         horaFin: `${especialHoraFin.slice(0, 5)}:00`,
         titulo: especialTitulo.trim() || 'Clase Especial',
-        capacidad: especialCapacidad || 15,
+        capacidad: capacidadObjetivo,
       })
 
       if (res.error || !res.data) {
@@ -190,6 +216,11 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
           description: res.error || 'No se pudo registrar la clase especial',
         })
         return
+      }
+
+      const syncRes = await ensureBicicletasForEmpresa(empresaId, capacidadObjetivo)
+      if (syncRes.error) {
+        console.warn('No se pudieron sincronizar las bicicletas para la clase especial:', syncRes.error)
       }
 
       toast({
@@ -238,14 +269,20 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
               <ClipboardList className={`w-6 h-6 ${currentPalette.textClass}`} />
-              <span>Planificaciones y Clases Especiales</span>
+              <span>
+                {verticalConfig.navPlanificacionesLabel} y {verticalConfig.sesionPlural} Especiales
+              </span>
             </h1>
             <Badge variant="outline" className="text-xs font-mono">
               {studioName}
             </Badge>
+            <Badge variant="secondary" className="text-xs font-semibold">
+              {verticalConfig.etiquetaNegocio}
+            </Badge>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Genera programación masiva omitiendo domingos/festivos en Colombia o programa sesiones especiales.
+            Genera programación masiva omitiendo domingos/festivos en Colombia o programa{' '}
+            {verticalConfig.sesionPlural.toLowerCase()} especiales.
           </p>
         </div>
 
@@ -279,13 +316,13 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="tituloMasivo" className="text-xs font-bold">
-                  Título de las Clases
+                  Título de {sesionMasculina ? 'los' : 'las'} {verticalConfig.sesionPlural}
                 </Label>
                 <Input
                   id="tituloMasivo"
                   value={tituloMasivo}
                   onChange={(e) => setTituloMasivo(e.target.value)}
-                  placeholder="Ej: Power Cycling AM"
+                  placeholder={`Ej: ${verticalConfig.ejemploSesion}`}
                   className="text-xs"
                 />
               </div>
@@ -331,7 +368,7 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
 
               <div className="space-y-1.5">
                 <Label htmlFor="capacidadMasiva" className="text-xs font-bold">
-                  Capacidad (Bicicletas)
+                  Capacidad ({verticalConfig.recursoPlural})
                 </Label>
                 <Input
                   id="capacidadMasiva"
@@ -412,16 +449,18 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
         <CardHeader className="p-5 pb-3 border-b">
           <CardTitle className="text-base flex items-center gap-2">
             <Sparkles className={`w-4 h-4 ${currentPalette.textClass}`} />
-            <span>Agregar Clase Especial</span>
+            <span>Agregar {verticalConfig.sesionSingular} Especial</span>
           </CardTitle>
           <CardDescription className="text-xs">
-            Crea sesiones temáticas puntuales con etiqueta especial.
+            Crea {verticalConfig.sesionPlural.toLowerCase()} temáticas puntuales con etiqueta especial.
           </CardDescription>
         </CardHeader>
 
         <CardContent className="p-5 grid gap-6 lg:grid-cols-12">
           <div className="lg:col-span-5 space-y-2">
-            <Label className="text-xs font-bold">Fecha de Clase Especial</Label>
+            <Label className="text-xs font-bold">
+              Fecha de {verticalConfig.sesionSingular} Especial
+            </Label>
             <Calendar
               mode="single"
               selected={especialFecha}
@@ -434,20 +473,20 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="especialTitulo" className="text-xs font-bold">
-                  Título de la Sesión Especial
+                  Título de {sesionMasculina ? 'l' : 'la'} {verticalConfig.sesionSingular} Especial
                 </Label>
                 <Input
                   id="especialTitulo"
                   value={especialTitulo}
                   onChange={(e) => setEspecialTitulo(e.target.value)}
-                  placeholder="Ej: Glow Ride Neón VIP"
+                  placeholder={`Ej: ${verticalConfig.ejemploSesion} VIP`}
                   className="text-xs"
                 />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="especialCapacidad" className="text-xs font-bold">
-                  Capacidad (Bicicletas)
+                  Capacidad ({verticalConfig.recursoPlural})
                 </Label>
                 <Input
                   id="especialCapacidad"
@@ -486,7 +525,7 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
                   Agregando...
                 </>
               ) : (
-                'Agregar Clase Especial'
+                `Agregar ${verticalConfig.sesionSingular} Especial`
               )}
             </Button>
           </div>
@@ -498,7 +537,7 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
         <CardHeader className="p-5 pb-3 border-b flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-base">
-              Clases Programadas Vigentes ({clasesProgramadas.length})
+              {verticalConfig.sesionPlural} Programad{sesionMasculina ? 'os' : 'as'} Vigentes ({clasesProgramadas.length})
             </CardTitle>
             <CardDescription className="text-xs">
               Listado real en base de datos desde la fecha actual.
@@ -513,7 +552,8 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
             </div>
           ) : clasesProgramadas.length === 0 ? (
             <div className="p-8 text-center text-xs text-muted-foreground">
-              No hay clases programadas registradas aún.
+              No hay {verticalConfig.sesionPlural.toLowerCase()} programad{sesionMasculina ? 'os' : 'as'} registrad
+              {sesionMasculina ? 'os' : 'as'} aún.
             </div>
           ) : (
             <Table>
@@ -521,8 +561,8 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
                 <TableRow>
                   <TableHead className="text-xs">Fecha</TableHead>
                   <TableHead className="text-xs">Horario</TableHead>
-                  <TableHead className="text-xs">Clase</TableHead>
-                  <TableHead className="text-xs">Ocupación</TableHead>
+                  <TableHead className="text-xs">{verticalConfig.sesionSingular}</TableHead>
+                  <TableHead className="text-xs">Ocupación ({verticalConfig.recursoCortoPlural})</TableHead>
                   <TableHead className="text-xs text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
