@@ -100,9 +100,10 @@ ON public.empresas FOR SELECT
 USING (activo = true OR public.is_admin_of_empresa(id));
 
 DROP POLICY IF EXISTS "Solo superadmin crea empresas" ON public.empresas;
-CREATE POLICY "Solo superadmin crea empresas" 
+DROP POLICY IF EXISTS "Permitir crear empresas en autoservicio o por superadmin" ON public.empresas;
+CREATE POLICY "Permitir crear empresas en autoservicio o por superadmin" 
 ON public.empresas FOR INSERT 
-WITH CHECK (public.is_superadmin());
+WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Admin actualiza su empresa o superadmin" ON public.empresas;
 CREATE POLICY "Admin actualiza su empresa o superadmin" 

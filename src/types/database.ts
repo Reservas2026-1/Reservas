@@ -25,6 +25,7 @@ export interface Database {
           id: string
           nombre: string
           slug: string | null
+          tipo_negocio: string | null
           ruc_o_identificacion: string | null
           telefono: string | null
           email: string | null
@@ -41,6 +42,7 @@ export interface Database {
           id?: string
           nombre: string
           slug?: string | null
+          tipo_negocio?: string | null
           ruc_o_identificacion?: string | null
           telefono?: string | null
           email?: string | null
@@ -57,6 +59,7 @@ export interface Database {
           id?: string
           nombre?: string
           slug?: string | null
+          tipo_negocio?: string | null
           ruc_o_identificacion?: string | null
           telefono?: string | null
           email?: string | null

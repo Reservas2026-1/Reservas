@@ -1,8 +1,11 @@
 // Centralización de Servicios Backend de Negocio
-export { authService } from './authService'
+export { authService, generateSlug } from './authService'
 export type {
   SignUpParams,
   SignInParams,
+  RegisterStudioParams,
+  RegisterStudioResult,
+  EmpresaActiva,
   AuthResponse,
   AuthSessionData,
 } from './authService'

@@ -8,6 +8,9 @@
 ALTER TABLE public.empresas
     ADD COLUMN IF NOT EXISTS capacidad_sala INTEGER DEFAULT 15;
 
+ALTER TABLE public.empresas
+    ADD COLUMN IF NOT EXISTS tipo_negocio VARCHAR(100);
+
 UPDATE public.empresas
 SET capacidad_sala = 15
 WHERE capacidad_sala IS NULL OR capacidad_sala <= 0;

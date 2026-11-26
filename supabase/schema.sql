@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS public.empresas (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     nombre VARCHAR(255) NOT NULL,
     slug VARCHAR(100) UNIQUE,
+    tipo_negocio VARCHAR(100),
     ruc_o_identificacion VARCHAR(50),
     telefono VARCHAR(50),
     email VARCHAR(255),

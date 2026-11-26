@@ -24,7 +24,7 @@ import { Toaster } from '@/components/ui/toaster'
 import { BrandingProvider, useBranding } from '@/context/BrandingContext'
 import { BrandingToolbar } from '@/components/ui/branding-toolbar'
 import SidebarLayout, { type SidebarNavSection } from '@/components/layout/SidebarLayout'
-import { AuthView } from '@/components/auth/AuthView'
+import { LandingReserlyView } from '@/components/saas/LandingReserlyView'
 import { ClientDashboard } from '@/components/cliente/ClientDashboard'
 import { authService } from '@/services/authService'
 import type { Tables } from '@/types'
@@ -157,9 +157,9 @@ function AdminSectionBanner({ title, description }: { title: string; description
 function MainApp() {
   const { studioName, currentPalette, empresaId } = useBranding()
 
-  // Estado de usuario y sesión
-  const [currentUser, setCurrentUser] = useState<Tables<'perfiles'> | null>(mockClienteProfile)
-  const [isLoggedIn, setIsLoggedIn] = useState(true)
+  // Estado de usuario y sesión (por defecto no autenticado para mostrar la Landing Page comercial)
+  const [currentUser, setCurrentUser] = useState<Tables<'perfiles'> | null>(null)
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [activeTab, setActiveTab] = useState<TabMode>('cliente-dashboard')
 
   // Suscripción a cambios de autenticación de Supabase Auth
@@ -174,6 +174,11 @@ function MainApp() {
           if (isMounted && profileRes.data) {
             setCurrentUser(profileRes.data)
             setIsLoggedIn(true)
+            if (profileRes.data.rol === 'admin') {
+              setActiveTab('admin-dashboard')
+            } else {
+              setActiveTab('cliente-dashboard')
+            }
           }
         }
       } catch (e) {
@@ -189,6 +194,11 @@ function MainApp() {
         if (profileRes.data) {
           setCurrentUser(profileRes.data)
           setIsLoggedIn(true)
+          if (profileRes.data.rol === 'admin') {
+            setActiveTab('admin-dashboard')
+          } else {
+            setActiveTab('cliente-dashboard')
+          }
         }
       } else if (event === 'SIGNED_OUT') {
         setCurrentUser(null)
@@ -203,9 +213,13 @@ function MainApp() {
   }, [])
 
   const handleAuthSuccess = (profile: Tables<'perfiles'> | null) => {
-    setCurrentUser(profile || mockClienteProfile)
+    setCurrentUser(profile)
     setIsLoggedIn(true)
-    setActiveTab('cliente-dashboard')
+    if (profile?.rol === 'admin') {
+      setActiveTab('admin-dashboard')
+    } else {
+      setActiveTab('cliente-dashboard')
+    }
   }
 
   const handleSkipToDemo = (rol: 'cliente' | 'admin') => {
@@ -226,48 +240,13 @@ function MainApp() {
     setActiveTab('cliente-dashboard')
   }
 
-  // Si no está autenticado, mostramos la pantalla de Auth
+  // Si no está autenticado, mostramos la Landing Page Comercial Reserly
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col justify-between overflow-x-hidden relative">
-        {/* Fondo ambiental del estudio y líneas sutiles */}
-        <div
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-[0.12] dark:opacity-[0.08] pointer-events-none"
-          style={{ backgroundImage: "url('/bg-studio.jpg')" }}
-        />
-        <div className="absolute inset-0 bg-[linear-gradient(135deg,transparent_40%,rgba(220,38,38,0.04)_50%,transparent_60%)] pointer-events-none" />
-
-        <header className="border-b bg-card/80 backdrop-blur-md px-4 sm:px-8 py-3 flex items-center justify-between gap-2 relative z-10">
-          <div className="flex items-center gap-3 min-w-0">
-            <img
-              src="/logo-ruedapro.png"
-              alt={studioName}
-              className="h-14 w-auto object-contain shrink-0"
-            />
-            <div className="min-w-0">
-              <span className="font-extrabold text-sm sm:text-base tracking-tight truncate block">
-                {studioName}
-              </span>
-              <span className="text-[11px] text-muted-foreground block truncate">
-                Software de Gestión &amp; Reservas
-              </span>
-            </div>
-          </div>
-
-          <BrandingToolbar />
-        </header>
-
-        <main className="flex-1 flex items-center justify-center p-4 relative z-10">
-          <AuthView onAuthSuccess={handleAuthSuccess} onSkipToDemo={handleSkipToDemo} />
-        </main>
-
-        <footer className="border-t py-4 text-center text-xs text-muted-foreground bg-card/80 backdrop-blur-md px-4 relative z-10">
-          <div className="flex items-center justify-center gap-1.5 flex-wrap">
-            <Sparkles className={`w-3.5 h-3.5 ${currentPalette.textClass}`} />
-            <span>{studioName} — Reservas Multi-Tenant con Protección Transaccional RPC</span>
-          </div>
-        </footer>
-      </div>
+      <LandingReserlyView
+        onAuthSuccess={handleAuthSuccess}
+        onSkipToDemo={handleSkipToDemo}
+      />
     )
   }
 

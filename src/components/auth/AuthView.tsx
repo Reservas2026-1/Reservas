@@ -1,6 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
-  Bike,
   Mail,
   Lock,
   User,
@@ -9,26 +8,59 @@ import {
   AlertCircle,
   Loader2,
   CheckCircle2,
-  Sparkles,
   ArrowRight,
-  ShieldCheck,
+  Building2,
+  Briefcase,
+  Sparkles,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { useBranding } from '@/context/BrandingContext'
-import { authService, type SignUpParams, type SignInParams } from '@/services/authService'
+import { authService, type EmpresaActiva } from '@/services/authService'
 import type { Tables } from '@/types/database'
 
-interface AuthViewProps {
+export interface AuthViewProps {
   onAuthSuccess: (userProfile: Tables<'perfiles'> | null) => void
+  initialMode?: 'signin' | 'signup' | 'register-studio'
+  initialRubro?: string
   onSkipToDemo?: (rol: 'cliente' | 'admin') => void
 }
 
-export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, onSkipToDemo }) => {
-  const { studioName, currentPalette } = useBranding()
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+const RUBRO_OPTIONS = [
+  'Spinning / Ciclismo indoor',
+  'Pilates',
+  'Yoga',
+  'Gimnasio / Entrenamiento',
+  'Salón de belleza',
+  'Consultorio profesional',
+  'Canchas deportivas',
+]
+
+/**
+ * Normaliza y asocia el rubro recibido desde la landing page a las opciones estándar del selector.
+ */
+function mapInitialRubro(rubro?: string): string {
+  if (!rubro) return RUBRO_OPTIONS[0]
+  const lower = rubro.toLowerCase()
+  if (lower.includes('spin') || lower.includes('ciclis')) return 'Spinning / Ciclismo indoor'
+  if (lower.includes('pilat')) return 'Pilates'
+  if (lower.includes('yoga') || lower.includes('medita')) return 'Yoga'
+  if (lower.includes('gimnas') || lower.includes('entrena') || lower.includes('funcional')) return 'Gimnasio / Entrenamiento'
+  if (lower.includes('belleza') || lower.includes('barber') || lower.includes('salon')) return 'Salón de belleza'
+  if (lower.includes('consultorio') || lower.includes('medic') || lower.includes('terap')) return 'Consultorio profesional'
+  if (lower.includes('cancha') || lower.includes('deport')) return 'Canchas deportivas'
+
+  const exactMatch = RUBRO_OPTIONS.find((opt) => opt.toLowerCase() === lower)
+  return exactMatch || RUBRO_OPTIONS[0]
+}
+
+export const AuthView: React.FC<AuthViewProps> = ({
+  onAuthSuccess,
+  initialMode = 'signin',
+  initialRubro,
+}) => {
+  const [mode, setMode] = useState<'signin' | 'signup' | 'register-studio'>(initialMode)
   const [loading, setLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
@@ -40,19 +72,75 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, onSkipToDemo 
   const [documento, setDocumento] = useState('')
   const [telefono, setTelefono] = useState('')
 
+  // Campos específicos de registro de estudio
+  const [nombreNegocio, setNombreNegocio] = useState('')
+  const [tipoNegocio, setTipoNegocio] = useState<string>(() => mapInitialRubro(initialRubro))
+  const [nombreAdmin, setNombreAdmin] = useState('')
+
+  // Empresas activas para registro de alumno
+  const [empresas, setEmpresas] = useState<EmpresaActiva[]>([])
+  const [loadingEmpresas, setLoadingEmpresas] = useState(false)
+  const [selectedEmpresaId, setSelectedEmpresaId] = useState<string>('')
+
+  // Sincronizar props cuando cambian externamente
+  useEffect(() => {
+    if (initialMode) {
+      setMode(initialMode)
+      setErrorMessage(null)
+      setSuccessMessage(null)
+    }
+  }, [initialMode])
+
+  useEffect(() => {
+    if (initialRubro) {
+      setTipoNegocio(mapInitialRubro(initialRubro))
+    }
+  }, [initialRubro])
+
+  // Cargar lista de empresas activas cuando se entra a modo signup de alumno
+  useEffect(() => {
+    if (mode === 'signup') {
+      let isMounted = true
+      const fetchEmpresas = async () => {
+        setLoadingEmpresas(true)
+        try {
+          const res = await authService.getActiveEmpresas()
+          if (isMounted && res.data) {
+            setEmpresas(res.data)
+            if (res.data.length > 0 && !selectedEmpresaId) {
+              setSelectedEmpresaId(res.data[0].id)
+            }
+          }
+        } catch (err) {
+          console.error('Error al cargar empresas activas:', err)
+        } finally {
+          if (isMounted) setLoadingEmpresas(false)
+        }
+      }
+      fetchEmpresas()
+      return () => {
+        isMounted = false
+      }
+    }
+  }, [mode, selectedEmpresaId])
+
+  // Handler: Iniciar Sesión
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorMessage(null)
     setSuccessMessage(null)
-    setLoading(true)
 
+    if (!email.trim() || !password) {
+      setErrorMessage('Por favor ingresa tu correo y contraseña')
+      return
+    }
+
+    setLoading(true)
     try {
-      const params: SignInParams = {
+      const res = await authService.signIn({
         email: email.trim(),
         password,
-      }
-
-      const res = await authService.signIn(params)
+      })
 
       if (res.error) {
         setErrorMessage(res.error)
@@ -60,7 +148,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, onSkipToDemo 
         setSuccessMessage('¡Inicio de sesión exitoso! Redirigiendo...')
         setTimeout(() => {
           onAuthSuccess(res.data?.perfil || null)
-        }, 600)
+        }, 500)
       }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Error al conectar con el servidor')
@@ -69,37 +157,51 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, onSkipToDemo 
     }
   }
 
+  // Handler: Registro de Alumno
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorMessage(null)
     setSuccessMessage(null)
 
+    if (!nombreCompleto.trim()) {
+      setErrorMessage('Por favor ingresa tu nombre completo')
+      return
+    }
+    if (!email.trim()) {
+      setErrorMessage('Por favor ingresa un correo electrónico válido')
+      return
+    }
     if (password.length < 6) {
       setErrorMessage('La contraseña debe tener al menos 6 caracteres')
       return
     }
 
     setLoading(true)
-
     try {
-      const params: SignUpParams = {
+      const res = await authService.signUp({
         email: email.trim(),
         password,
         nombreCompleto: nombreCompleto.trim(),
         documento: documento.trim() || undefined,
         telefono: telefono.trim() || undefined,
+        empresaId: selectedEmpresaId || undefined,
         rol: 'cliente',
-      }
-
-      const res = await authService.signUp(params)
+      })
 
       if (res.error) {
         setErrorMessage(res.error)
       } else {
-        setSuccessMessage(
-          '¡Cuenta creada exitosamente! Puedes iniciar sesión o revisar tu correo para confirmar.'
-        )
-        setMode('signin')
+        // Autenticación automática tras registro si Supabase entrega sesión
+        const signInRes = await authService.signIn({ email: email.trim(), password })
+        if (signInRes.data?.perfil) {
+          setSuccessMessage('¡Cuenta creada e inicio de sesión exitoso! Redirigiendo...')
+          setTimeout(() => {
+            onAuthSuccess(signInRes.data?.perfil || null)
+          }, 500)
+        } else {
+          setSuccessMessage('¡Cuenta de alumno creada exitosamente! Ahora puedes iniciar sesión.')
+          setMode('signin')
+        }
       }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Error inesperado durante el registro')
@@ -108,251 +210,499 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, onSkipToDemo 
     }
   }
 
-  const handleQuickDemo = (rol: 'cliente' | 'admin') => {
-    if (onSkipToDemo) {
-      onSkipToDemo(rol)
+  // Handler: Registrar Estudio / Negocio
+  const handleRegisterStudio = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setErrorMessage(null)
+    setSuccessMessage(null)
+
+    if (!nombreNegocio.trim()) {
+      setErrorMessage('Por favor ingresa el nombre de tu negocio o estudio')
+      return
+    }
+    if (!nombreAdmin.trim()) {
+      setErrorMessage('Por favor ingresa el nombre del administrador')
+      return
+    }
+    if (!email.trim()) {
+      setErrorMessage('Por favor ingresa un correo electrónico')
+      return
+    }
+    if (password.length < 6) {
+      setErrorMessage('La contraseña debe tener al menos 6 caracteres')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const res = await authService.registerStudio({
+        nombreNegocio: nombreNegocio.trim(),
+        tipoNegocio,
+        nombreAdmin: nombreAdmin.trim(),
+        email: email.trim(),
+        password,
+        telefono: telefono.trim() || undefined,
+      })
+
+      if (res.error) {
+        setErrorMessage(res.error)
+      } else {
+        setSuccessMessage('¡Estudio creado con éxito! Iniciando sesión...')
+        setTimeout(() => {
+          onAuthSuccess(res.data?.perfil || null)
+        }, 500)
+      }
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Error inesperado al registrar el estudio')
+    } finally {
+      setLoading(false)
     }
   }
 
   return (
-    <div className="min-h-[85vh] flex items-center justify-center py-8 px-4 sm:px-6">
-      <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-        {/* Banner Izquierdo Informativo y Branding */}
-        <div className="space-y-6 lg:pr-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-muted border text-xs font-semibold">
-            <span className={`w-2.5 h-2.5 rounded-full ${currentPalette.bgClass} animate-pulse`} />
-            <span>Sistema multiinquilino para ciclismo en interiores</span>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <div
-                className={`w-12 h-12 rounded-2xl ${currentPalette.bgClass} text-white flex items-center justify-center shadow-lg shadow-red-500/20`}
-              >
-                <Bike className="w-7 h-7" />
-              </div>
-              <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-                {studioName}
-              </h1>
-            </div>
-
-            <p className="text-base text-gray-700 leading-relaxed">
-              Reserva tu bicicleta en tiempo real para las mejores sesiones de ritmo, potencia y
-              resistencia. Gestiona tus créditos, paquetes y pases de acceso QR en un solo lugar.
-            </p>
-          </div>
-
-          {/* Características clave */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-            <div className="p-3.5 rounded-xl border bg-card/60 backdrop-blur-sm space-y-1">
-              <div className="flex items-center gap-2 text-sm font-bold">
-                <Bike className={`w-4 h-4 ${currentPalette.textClass}`} />
-                <span>Bicicletas Pro</span>
-              </div>
-              <p className="text-xs text-gray-700 ">
-                Selección de puesto en tarima con vista 3x5 interactiva.
-              </p>
-            </div>
-
-            <div className="p-3.5 rounded-xl border bg-card/60 backdrop-blur-sm space-y-1">
-              <div className="flex items-center gap-2 text-sm font-bold">
-                <ShieldCheck className={`w-4 h-4 ${currentPalette.textClass}`} />
-                <span>Pase QR Inteligente</span>
-              </div>
-              <p className="text-xs text-gray-700 ">
-                Check-in instantáneo en recepción sin esperas ni fricción.
-              </p>
-            </div>
-          </div>
+    <div className="w-full max-w-md mx-auto p-4 sm:p-6">
+      <Card className="border-0 shadow-none bg-transparent">
+        {/* Selector de modo estilo tabs */}
+        <div className="flex gap-1 p-1 bg-muted/80 rounded-xl mb-4 text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => {
+              setMode('signin')
+              setErrorMessage(null)
+              setSuccessMessage(null)
+            }}
+            className={`flex-1 py-2 px-2 rounded-lg text-center transition-all cursor-pointer ${mode === 'signin'
+                ? 'bg-background shadow-xs text-foreground font-bold'
+                : 'text-muted-foreground hover:text-foreground'
+              }`}
+          >
+            Iniciar Sesión
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode('signup')
+              setErrorMessage(null)
+              setSuccessMessage(null)
+            }}
+            className={`flex-1 py-2 px-2 rounded-lg text-center transition-all cursor-pointer ${mode === 'signup'
+                ? 'bg-background shadow-xs text-foreground font-bold'
+                : 'text-muted-foreground hover:text-foreground'
+              }`}
+          >
+            Soy Alumno
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode('register-studio')
+              setErrorMessage(null)
+              setSuccessMessage(null)
+            }}
+            className={`flex-1 py-2 px-2 rounded-lg text-center transition-all cursor-pointer ${mode === 'register-studio'
+                ? 'bg-red-600 text-white shadow-xs font-bold'
+                : 'text-muted-foreground hover:text-foreground'
+              }`}
+          >
+            Crear Estudio
+          </button>
         </div>
 
-        {/* Tarjeta de Login / Registro */}
-        <Card className="shadow-xl border-border/80">
-          <CardHeader className="space-y-2 pb-4">
-            <div className="flex justify-between items-center">
-              <div className="flex gap-1 p-1 bg-muted rounded-lg">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode('signin')
-                    setErrorMessage(null)
-                  }}
-                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${mode === 'signin'
-                    ? 'bg-background shadow-sm text-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                >
-                  Iniciar Sesión
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode('signup')
-                    setErrorMessage(null)
-                  }}
-                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${mode === 'signup'
-                    ? 'bg-background shadow-sm text-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                >
-                  Registrarse
-                </button>
-              </div>
-
-              <Badge variant="outline" className="text-[10px] font-mono">
-                {mode === 'signin' ? 'Acceso Cliente' : 'Nuevo Ciclista'}
+        {/* Encabezado dinámico */}
+        <CardHeader className="p-0 pb-4 space-y-1.5 text-center">
+          <div className="flex items-center justify-center gap-1.5 mb-1">
+            {mode === 'register-studio' && (
+              <Badge className="bg-red-600 hover:bg-red-700 text-white text-[10px] uppercase font-bold tracking-wider">
+                <Sparkles className="w-3 h-3 mr-1" /> Prueba 30 Días Gratis
               </Badge>
-            </div>
+            )}
+            {mode === 'signin' && (
+              <Badge variant="outline" className="text-[10px] font-mono">
+                Acceso Plataforma
+              </Badge>
+            )}
+            {mode === 'signup' && (
+              <Badge variant="outline" className="text-[10px] font-mono">
+                Nuevo Alumno
+              </Badge>
+            )}
+          </div>
 
-            <CardTitle className="text-xl">
-              {mode === 'signin' ? 'Bienvenido a tu Estudio' : 'Crea tu Cuenta de Ciclista'}
-            </CardTitle>
-            <CardDescription className="text-xs">
-              {mode === 'signin'
-                ? 'Ingresa tus credenciales para acceder a tus reservas y tiqueteras.'
-                : 'Completa tus datos para empezar a reservar tus clases de Indoor Cycling.'}
-            </CardDescription>
-          </CardHeader>
+          <CardTitle className="text-2xl font-black tracking-tight text-foreground">
+            {mode === 'register-studio' && 'Registra tu Negocio o Estudio'}
+            {mode === 'signin' && 'Iniciar Sesión'}
+            {mode === 'signup' && 'Crear Cuenta de Alumno'}
+          </CardTitle>
 
-          {/* Feedback de error y éxito */}
-          {errorMessage && (
-            <div className="mx-6 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
+          <CardDescription className="text-xs text-muted-foreground max-w-sm mx-auto">
+            {mode === 'register-studio' && 'Comienza tu prueba gratuita por 30 días sin tarjeta.'}
+            {mode === 'signin' && 'Ingresa tus credenciales para acceder a tu cuenta.'}
+            {mode === 'signup' && 'Inscríbete a tu estudio para reservar clases y comprar planes.'}
+          </CardDescription>
+        </CardHeader>
 
-          {successMessage && (
-            <div className="mx-6 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>{successMessage}</span>
-            </div>
-          )}
+        {/* Notificaciones de error o éxito */}
+        {errorMessage && (
+          <div className="mb-4 p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
 
-          <form onSubmit={mode === 'signin' ? handleSignIn : handleSignUp}>
-            <CardContent className="space-y-3.5 pt-2">
-              {mode === 'signup' && (
-                <>
+        {successMessage && (
+          <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{successMessage}</span>
+          </div>
+        )}
+
+        {/* Formulario */}
+        <form
+          onSubmit={
+            mode === 'register-studio'
+              ? handleRegisterStudio
+              : mode === 'signin'
+                ? handleSignIn
+                : handleSignUp
+          }
+        >
+          <CardContent className="p-0 space-y-3.5">
+            {/* ========================================================
+                CAMPOS MODO: REGISTRAR ESTUDIO / NEGOCIO
+            ======================================================== */}
+            {mode === 'register-studio' && (
+              <>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                    <Building2 className="w-3.5 h-3.5" />
+                    Nombre del Negocio / Estudio *
+                  </label>
+                  <Input
+                    type="text"
+                    required
+                    placeholder="Ej. Studio Velox, Zen Yoga..."
+                    value={nombreNegocio}
+                    onChange={(e) => setNombreNegocio(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="tipoNegocio"
+                    className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1"
+                  >
+                    <Briefcase className="w-3.5 h-3.5" />
+                    Tipo de Negocio *
+                  </label>
+                  <select
+                    id="tipoNegocio"
+                    value={tipoNegocio}
+                    onChange={(e) => setTipoNegocio(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-xs focus:outline-hidden focus:ring-2 focus:ring-red-500 transition-colors"
+                  >
+                    {RUBRO_OPTIONS.map((rubro) => (
+                      <option key={rubro} value={rubro}>
+                        {rubro}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                    <User className="w-3.5 h-3.5" />
+                    Nombre del Administrador *
+                  </label>
+                  <Input
+                    type="text"
+                    required
+                    placeholder="Ej. Carlos Mendoza"
+                    value={nombreAdmin}
+                    onChange={(e) => setNombreAdmin(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                    <Mail className="w-3.5 h-3.5" />
+                    Correo Electrónico *
+                  </label>
+                  <Input
+                    type="email"
+                    required
+                    placeholder="admin@tuempresa.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                    <Lock className="w-3.5 h-3.5" />
+                    Contraseña *
+                  </label>
+                  <Input
+                    type="password"
+                    required
+                    placeholder="Mínimo 6 caracteres"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                    <Phone className="w-3.5 h-3.5" />
+                    Teléfono / WhatsApp (opcional)
+                  </label>
+                  <Input
+                    type="tel"
+                    placeholder="Ej. +57 300 123 4567"
+                    value={telefono}
+                    onChange={(e) => setTelefono(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+
+            {/* ========================================================
+                CAMPOS MODO: INICIAR SESIÓN
+            ======================================================== */}
+            {mode === 'signin' && (
+              <>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                    <Mail className="w-3.5 h-3.5" />
+                    Correo Electrónico *
+                  </label>
+                  <Input
+                    type="email"
+                    required
+                    placeholder="tu@correo.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                    <Lock className="w-3.5 h-3.5" />
+                    Contraseña *
+                  </label>
+                  <Input
+                    type="password"
+                    required
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+
+            {/* ========================================================
+                CAMPOS MODO: REGISTRAR ALUMNO
+            ======================================================== */}
+            {mode === 'signup' && (
+              <>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                    <Building2 className="w-3.5 h-3.5" />
+                    ¿A qué estudio o negocio te inscribes? *
+                  </label>
+                  {loadingEmpresas ? (
+                    <div className="flex items-center gap-2 p-2.5 text-xs text-muted-foreground border rounded-md bg-muted/30">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-red-600" />
+                      <span>Cargando estudios disponibles...</span>
+                    </div>
+                  ) : empresas.length === 0 ? (
+                    <div className="p-2.5 border border-amber-300 dark:border-amber-800 rounded-md bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 text-xs">
+                      No hay estudios registrados aún. Puedes registrar el tuyo en la pestaña &quot;Crear Estudio&quot;.
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedEmpresaId}
+                      onChange={(e) => setSelectedEmpresaId(e.target.value)}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-xs focus:outline-hidden focus:ring-2 focus:ring-red-500 transition-colors"
+                      required
+                    >
+                      <option value="" disabled>
+                        Selecciona un estudio...
+                      </option>
+                      {empresas.map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.nombre} {emp.tipo_negocio ? `(${emp.tipo_negocio})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                    <User className="w-3.5 h-3.5" />
+                    Nombre Completo *
+                  </label>
+                  <Input
+                    type="text"
+                    required
+                    placeholder="Ej. Valeria Gómez"
+                    value={nombreCompleto}
+                    onChange={(e) => setNombreCompleto(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                    <Mail className="w-3.5 h-3.5" />
+                    Correo Electrónico *
+                  </label>
+                  <Input
+                    type="email"
+                    required
+                    placeholder="alumno@correo.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                    <Lock className="w-3.5 h-3.5" />
+                    Contraseña *
+                  </label>
+                  <Input
+                    type="password"
+                    required
+                    placeholder="Mínimo 6 caracteres"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
-                      <User className="w-3.5 h-3.5" />
-                      Nombre Completo
+                      <FileText className="w-3.5 h-3.5" />
+                      DNI / Documento (opcional)
                     </label>
                     <Input
                       type="text"
-                      required
-                      placeholder="Ej. Valeria Gómez"
-                      value={nombreCompleto}
-                      onChange={(e) => setNombreCompleto(e.target.value)}
+                      placeholder="71829304"
+                      value={documento}
+                      onChange={(e) => setDocumento(e.target.value)}
                     />
                   </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
-                        <FileText className="w-3.5 h-3.5" />
-                        DNI / Documento
-                      </label>
-                      <Input
-                        type="text"
-                        placeholder="71829304"
-                        value={documento}
-                        onChange={(e) => setDocumento(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
-                        <Phone className="w-3.5 h-3.5" />
-                        Teléfono / WhatsApp
-                      </label>
-                      <Input
-                        type="tel"
-                        placeholder="987654321"
-                        value={telefono}
-                        onChange={(e) => setTelefono(e.target.value)}
-                      />
-                    </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                      <Phone className="w-3.5 h-3.5" />
+                      Teléfono / WhatsApp (opcional)
+                    </label>
+                    <Input
+                      type="tel"
+                      placeholder="3001234567"
+                      value={telefono}
+                      onChange={(e) => setTelefono(e.target.value)}
+                    />
                   </div>
+                </div>
+              </>
+            )}
+          </CardContent>
+
+          <CardFooter className="p-0 pt-4 flex flex-col gap-3">
+            <Button
+              type="submit"
+              disabled={loading}
+              className="w-full font-bold shadow-md bg-red-600 hover:bg-red-700 text-white transition-all cursor-pointer py-2.5 h-auto"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  Procesando...
+                </>
+              ) : (
+                <>
+                  <span>
+                    {mode === 'register-studio' && 'Crear mi Estudio (30 días gratis)'}
+                    {mode === 'signin' && 'Ingresar'}
+                    {mode === 'signup' && 'Crear Cuenta'}
+                  </span>
+                  <ArrowRight className="w-4 h-4 ml-1.5" />
                 </>
               )}
+            </Button>
 
-              <div>
-                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
-                  <Mail className="w-3.5 h-3.5" />
-                  Correo Electrónico
-                </label>
-                <Input
-                  type="email"
-                  required
-                  placeholder="ciclista@ejemplo.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
+            {/* Enlaces de alternancia inferior */}
+            <div className="w-full text-center text-xs text-muted-foreground space-y-1.5 pt-1">
+              {mode === 'register-studio' && (
+                <p>
+                  ¿Ya tienes cuenta?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('signin')
+                      setErrorMessage(null)
+                    }}
+                    className="font-bold text-red-600 dark:text-red-400 hover:underline cursor-pointer"
+                  >
+                    Iniciar Sesión
+                  </button>
+                </p>
+              )}
 
-              <div>
-                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
-                  <Lock className="w-3.5 h-3.5" />
-                  Contraseña
-                </label>
-                <Input
-                  type="password"
-                  required
-                  placeholder="Mínimo 6 caracteres"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-            </CardContent>
-
-            <CardFooter className="flex flex-col gap-3 pt-2">
-              <Button
-                type="submit"
-                disabled={loading}
-                className={`w-full font-semibold shadow-md ${currentPalette.bgClass} text-white hover:opacity-90`}
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    Procesando...
-                  </>
-                ) : (
-                  <>
-                    <span>{mode === 'signin' ? 'Iniciar Sesión' : 'Completar Registro'}</span>
-                    <ArrowRight className="w-4 h-4 ml-1.5" />
-                  </>
-                )}
-              </Button>
-
-              <div className="text-center text-xs text-muted-foreground">
-                {mode === 'signin' ? (
-                  <span>
-                    ¿No tienes una cuenta aún?{' '}
+              {mode === 'signin' && (
+                <>
+                  <p>
+                    ¿Eres alumno nuevo?{' '}
                     <button
                       type="button"
-                      onClick={() => setMode('signup')}
-                      className={`font-semibold underline ${currentPalette.textClass}`}
+                      onClick={() => {
+                        setMode('signup')
+                        setErrorMessage(null)
+                      }}
+                      className="font-bold text-red-600 dark:text-red-400 hover:underline cursor-pointer"
                     >
                       Regístrate aquí
                     </button>
-                  </span>
-                ) : (
-                  <span>
-                    ¿Ya estás registrado?{' '}
+                  </p>
+                  <p>
+                    ¿Quieres registrar tu estudio?{' '}
                     <button
                       type="button"
-                      onClick={() => setMode('signin')}
-                      className={`font-semibold underline ${currentPalette.textClass}`}
+                      onClick={() => {
+                        setMode('register-studio')
+                        setErrorMessage(null)
+                      }}
+                      className="font-bold text-red-600 dark:text-red-400 hover:underline cursor-pointer"
                     >
-                      Inicia sesión
+                      Prueba gratis
                     </button>
-                  </span>
-                )}
-              </div>
-            </CardFooter>
-          </form>
-        </Card>
-      </div>
+                  </p>
+                </>
+              )}
+
+              {mode === 'signup' && (
+                <p>
+                  ¿Ya tienes cuenta?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('signin')
+                      setErrorMessage(null)
+                    }}
+                    className="font-bold text-red-600 dark:text-red-400 hover:underline cursor-pointer"
+                  >
+                    Iniciar Sesión
+                  </button>
+                </p>
+              )}
+            </div>
+          </CardFooter>
+        </form>
+      </Card>
     </div>
   )
 }
+
+export default AuthView

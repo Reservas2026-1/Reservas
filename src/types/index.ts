@@ -16,6 +16,8 @@ export type TipoBicicleta = 'urbana' | 'montaña' | 'electrica' | 'ruta' | 'infa
 export interface Empresa {
   id: string
   nombre: string
+  slug?: string
+  tipo_negocio?: string
   ruc_o_identificacion?: string
   telefono?: string
   email?: string

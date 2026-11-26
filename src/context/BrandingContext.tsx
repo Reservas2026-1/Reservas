@@ -107,13 +107,13 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [studioName, setStudioName] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('rtc_studio_name')
-      if (!saved || saved === 'Revolution Indoor Cycle' || saved === 'VELO-X Cycling Studio') {
-        localStorage.setItem('rtc_studio_name', 'RuedaPro')
-        return 'RuedaPro'
+      if (!saved || saved === 'Revolution Indoor Cycle' || saved === 'VELO-X Cycling Studio' || saved === 'RuedaPro') {
+        localStorage.setItem('rtc_studio_name', 'Reserly')
+        return 'Reserly'
       }
       return saved
     }
-    return 'RuedaPro'
+    return 'Reserly'
   })
 
   const [paletteId, setPaletteId] = useState(() => {
@@ -132,9 +132,14 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [logoUrl, setLogoUrlState] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('rtc_logo_url') || '/logo-ruedapro.png'
+      const savedLogo = localStorage.getItem('rtc_logo_url')
+      if (!savedLogo || savedLogo === '/logo-ruedapro.png') {
+        localStorage.setItem('rtc_logo_url', '/LogoReserly.png')
+        return '/LogoReserly.png'
+      }
+      return savedLogo
     }
-    return '/logo-ruedapro.png'
+    return '/LogoReserly.png'
   })
 
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -156,7 +161,14 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const stored = localStorage.getItem('rtc_estudio_activo')
       if (stored) {
         try {
-          return JSON.parse(stored)
+          const parsed = JSON.parse(stored)
+          if (parsed && (parsed.nombre === 'RuedaPro' || parsed.logo_url === '/logo-ruedapro.png')) {
+            parsed.nombre = 'Reserly'
+            parsed.slug = 'reserly'
+            parsed.logo_url = '/LogoReserly.png'
+            localStorage.setItem('rtc_estudio_activo', JSON.stringify(parsed))
+          }
+          return parsed
         } catch {
           return null
         }
@@ -164,14 +176,14 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     return {
       id: 'e1000000-0000-0000-0000-000000000001',
-      nombre: 'RuedaPro',
-      slug: 'ruedapro',
-      logo_url: '/logo-ruedapro.png',
+      nombre: 'Reserly',
+      slug: 'reserly',
+      logo_url: '/LogoReserly.png',
       color_primario: '#DC2626',
       color_secundario: '#991B1B',
       direccion: 'Calle 85 # 12-40, Zona Rosa, Bogotá',
       telefono: '+57 310 123 4567',
-      email: 'contacto@ruedapro.co',
+      email: 'contacto@reserly.com',
       capacidad_sala: 15,
       activo: true,
     }
