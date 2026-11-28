@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
+import { empresasService } from '../services/empresasService'
 
 export interface ColorPalette {
   id: string
@@ -77,6 +78,7 @@ export interface EstudioInfo {
   tipo_negocio?: string | null
   ruc_o_identificacion?: string | null
   logo_url?: string | null
+  portada_url?: string | null
   color_primario?: string | null
   color_secundario?: string | null
   direccion?: string | null
@@ -491,7 +493,9 @@ export function getConfiguracionVertical(tipoNegocio?: string | null): Configura
   }
 }
 
-interface BrandingContextType {
+export interface BrandingContextType {
+  isSingleTenant: boolean
+  singleTenantId: string | null
   studioName: string
   setStudioName: (name: string) => void
   currentPalette: ColorPalette
@@ -500,23 +504,42 @@ interface BrandingContextType {
   setCustomPrimaryColor: (hex: string) => void
   logoUrl: string | null
   setLogoUrl: (url: string | null) => void
+  portadaUrl: string | null
+  setPortadaUrl: (url: string | null) => void
   isDarkMode: boolean
   toggleDarkMode: () => void
   empresaId: string
   setEmpresaId: (id: string) => void
   estudioActivo: EstudioInfo | null
   setEstudioActivo: (estudio: EstudioInfo) => void
+  actualizarEstudio: (cambios: Partial<EstudioInfo>) => Promise<void>
   verticalConfig: ConfiguracionVertical
 }
 
 const BrandingContext = createContext<BrandingContextType | undefined>(undefined)
 
+const RAW_SINGLE_TENANT_ID = import.meta.env.VITE_SINGLE_TENANT_ID
+const ENV_APP_NAME = import.meta.env.VITE_APP_NAME
+
+export const SINGLE_TENANT_ID: string | null =
+  typeof RAW_SINGLE_TENANT_ID === 'string' && RAW_SINGLE_TENANT_ID.trim().length > 0
+    ? RAW_SINGLE_TENANT_ID.trim()
+    : null
+
+export const IS_SINGLE_TENANT: boolean = SINGLE_TENANT_ID !== null
+
+export const APP_NAME: string =
+  typeof ENV_APP_NAME === 'string' && ENV_APP_NAME.trim().length > 0
+    ? ENV_APP_NAME.trim()
+    : 'Reserly'
+
 const DEFAULT_ESTUDIO_ACTIVO: EstudioInfo = {
-  id: 'e1000000-0000-0000-0000-000000000001',
-  nombre: 'Reserly',
-  slug: 'reserly',
+  id: SINGLE_TENANT_ID || 'e1000000-0000-0000-0000-000000000001',
+  nombre: APP_NAME,
+  slug: APP_NAME.toLowerCase().replace(/[^a-z0-9]/g, ''),
   tipo_negocio: 'Spinning / Ciclismo indoor',
   logo_url: '/LogoReserly.png',
+  portada_url: null,
   color_primario: '#DC2626',
   color_secundario: '#991B1B',
   direccion: 'Calle 85 # 12-40, Zona Rosa, Bogotá',
@@ -532,20 +555,26 @@ function readStoredEstudioActivo(): EstudioInfo | null {
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as EstudioInfo
-      if (parsed && (parsed.nombre === 'RuedaPro' || parsed.logo_url === '/logo-ruedapro.png')) {
-        parsed.nombre = 'Reserly'
-        parsed.slug = 'reserly'
-        parsed.logo_url = '/LogoReserly.png'
-        parsed.tipo_negocio = parsed.tipo_negocio || 'Spinning / Ciclismo indoor'
-        localStorage.setItem('rtc_estudio_activo', JSON.stringify(parsed))
+      if (parsed) {
+        if (IS_SINGLE_TENANT && SINGLE_TENANT_ID && parsed.id !== SINGLE_TENANT_ID) {
+          return DEFAULT_ESTUDIO_ACTIVO
+        }
+        if (parsed.nombre === 'RuedaPro' || parsed.logo_url === '/logo-ruedapro.png') {
+          parsed.nombre = APP_NAME
+          parsed.slug = APP_NAME.toLowerCase().replace(/[^a-z0-9]/g, '')
+          parsed.logo_url = '/LogoReserly.png'
+          parsed.tipo_negocio = parsed.tipo_negocio || 'Spinning / Ciclismo indoor'
+          localStorage.setItem('rtc_estudio_activo', JSON.stringify(parsed))
+        }
+        if (parsed.id === DEFAULT_ESTUDIO_ACTIVO.id && !parsed.tipo_negocio) {
+          parsed.tipo_negocio = DEFAULT_ESTUDIO_ACTIVO.tipo_negocio
+          localStorage.setItem('rtc_estudio_activo', JSON.stringify(parsed))
+        }
+        parsed.portada_url = parsed.portada_url || null
+        return parsed
       }
-      if (parsed && parsed.id === DEFAULT_ESTUDIO_ACTIVO.id && !parsed.tipo_negocio) {
-        parsed.tipo_negocio = DEFAULT_ESTUDIO_ACTIVO.tipo_negocio
-        localStorage.setItem('rtc_estudio_activo', JSON.stringify(parsed))
-      }
-      return parsed
     } catch {
-      return null
+      return DEFAULT_ESTUDIO_ACTIVO
     }
   }
   return DEFAULT_ESTUDIO_ACTIVO
@@ -601,14 +630,33 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return '/LogoReserly.png'
   })
 
+  const [portadaUrl, setPortadaUrlState] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const hasStoredEstudio = Boolean(localStorage.getItem('rtc_estudio_activo'))
+      if (hasStoredEstudio) {
+        const storedEstudio = readStoredEstudioActivo()
+        return storedEstudio?.portada_url ?? null
+      }
+      return localStorage.getItem('rtc_portada_url') || null
+    }
+    return null
+  })
+
   const [isDarkMode, setIsDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('rtc_theme') === 'dark'
+      const stored = localStorage.getItem('rtc_theme') || localStorage.getItem('theme')
+      if (stored) {
+        return stored === 'dark'
+      }
+      return document.documentElement.classList.contains('dark')
     }
     return false
   })
 
   const [empresaId, setEmpresaIdState] = useState(() => {
+    if (IS_SINGLE_TENANT && SINGLE_TENANT_ID) {
+      return SINGLE_TENANT_ID
+    }
     if (typeof window !== 'undefined') {
       const storedEstudio = readStoredEstudioActivo()
       if (storedEstudio?.id) return storedEstudio.id
@@ -637,14 +685,87 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return PALETTES[0]
   }, [paletteId, customPrimaryHex])
 
+  // En modo single-tenant, cargar y sincronizar la configuración del estudio desde Supabase
+  useEffect(() => {
+    if (!IS_SINGLE_TENANT || !SINGLE_TENANT_ID) return
+
+    let isMounted = true
+
+    const cargarEstudioSingleTenant = async () => {
+      try {
+        const { data, error } = await empresasService.getEstudioById(SINGLE_TENANT_ID)
+        if (!isMounted) return
+
+        if (error || !data) {
+          console.warn(`[BrandingContext] No se pudo obtener la empresa single-tenant con ID ${SINGLE_TENANT_ID}:`, error)
+          return
+        }
+
+        const estudioCargado: EstudioInfo = {
+          id: data.id,
+          nombre: data.nombre,
+          slug: data.slug,
+          tipo_negocio: data.tipo_negocio ?? null,
+          logo_url: data.logo_url ?? null,
+          portada_url: data.portada_url ?? null,
+          color_primario: data.color_primario ?? '#DC2626',
+          color_secundario: data.color_secundario ?? '#991B1B',
+          direccion: data.direccion ?? null,
+          telefono: data.telefono ?? null,
+          email: data.email ?? null,
+          capacidad_sala: data.capacidad_sala ?? 15,
+          activo: data.activo ?? true,
+        }
+
+        setEstudioActivoState(estudioCargado)
+        setEmpresaIdState(estudioCargado.id)
+        setStudioName(estudioCargado.nombre)
+        setLogoUrlState(estudioCargado.logo_url ?? null)
+        setPortadaUrlState(estudioCargado.portada_url ?? null)
+        if (estudioCargado.color_primario) {
+          setCustomPrimaryColor(estudioCargado.color_primario)
+        }
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('rtc_estudio_activo', JSON.stringify(estudioCargado))
+          localStorage.setItem('rtc_empresa_id', estudioCargado.id)
+          localStorage.setItem('rtc_studio_name', estudioCargado.nombre)
+          if (estudioCargado.logo_url) {
+            localStorage.setItem('rtc_logo_url', estudioCargado.logo_url)
+          } else {
+            localStorage.removeItem('rtc_logo_url')
+          }
+          if (estudioCargado.portada_url) {
+            localStorage.setItem('rtc_portada_url', estudioCargado.portada_url)
+          } else {
+            localStorage.removeItem('rtc_portada_url')
+          }
+          if (estudioCargado.color_primario) {
+            localStorage.setItem('rtc_custom_hex', estudioCargado.color_primario)
+          }
+        }
+      } catch (err) {
+        console.error('[BrandingContext] Error al cargar la configuración de empresa single-tenant:', err)
+      }
+    }
+
+    cargarEstudioSingleTenant()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
   useEffect(() => {
     const root = document.documentElement
     if (isDarkMode) {
       root.classList.add('dark')
       localStorage.setItem('rtc_theme', 'dark')
+      localStorage.setItem('theme', 'dark')
     } else {
       root.classList.remove('dark')
       localStorage.setItem('rtc_theme', 'light')
+      localStorage.setItem('theme', 'light')
     }
   }, [isDarkMode])
 
@@ -687,7 +808,19 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }
 
+  const setPortadaUrl = (url: string | null) => {
+    setPortadaUrlState(url)
+    if (typeof window !== 'undefined') {
+      if (url) localStorage.setItem('rtc_portada_url', url)
+      else localStorage.removeItem('rtc_portada_url')
+    }
+  }
+
   const setEmpresaId = (id: string) => {
+    if (IS_SINGLE_TENANT && SINGLE_TENANT_ID && id !== SINGLE_TENANT_ID) {
+      console.warn(`[BrandingContext] Despliegue en modo Single-Tenant bloqueado a la empresa ${SINGLE_TENANT_ID}. Intento de cambio a ${id} ignorado.`)
+      return
+    }
     setEmpresaIdState(id)
     if (typeof window !== 'undefined') {
       localStorage.setItem('rtc_empresa_id', id)
@@ -695,28 +828,106 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }
 
   const setEstudioActivo = (estudio: EstudioInfo) => {
+    if (IS_SINGLE_TENANT && SINGLE_TENANT_ID && estudio.id !== SINGLE_TENANT_ID) {
+      console.warn(`[BrandingContext] Despliegue en modo Single-Tenant bloqueado a la empresa ${SINGLE_TENANT_ID}. Intento de cambio al estudio ${estudio.id} ignorado.`)
+      return
+    }
+
     const estudioCompleto: EstudioInfo = {
       ...estudio,
       email: estudio.email ?? null,
       telefono: estudio.telefono ?? null,
       tipo_negocio: estudio.tipo_negocio ?? null,
+      portada_url: estudio.portada_url || null,
     }
     setEstudioActivoState(estudioCompleto)
     setEmpresaIdState(estudioCompleto.id)
     setStudioName(estudioCompleto.nombre)
     setLogoUrl(estudioCompleto.logo_url || null)
+    setPortadaUrl(estudioCompleto.portada_url || null)
     setCustomPrimaryColor(estudioCompleto.color_primario || '#DC2626')
 
     if (typeof window !== 'undefined') {
       localStorage.setItem('rtc_estudio_activo', JSON.stringify(estudioCompleto))
       localStorage.setItem('rtc_empresa_id', estudioCompleto.id)
       localStorage.setItem('rtc_studio_name', estudioCompleto.nombre)
+      if (estudioCompleto.portada_url) {
+        localStorage.setItem('rtc_portada_url', estudioCompleto.portada_url)
+      } else {
+        localStorage.removeItem('rtc_portada_url')
+      }
+    }
+  }
+
+  const actualizarEstudio = async (cambios: Partial<EstudioInfo>) => {
+    const targetId = IS_SINGLE_TENANT && SINGLE_TENANT_ID
+      ? SINGLE_TENANT_ID
+      : (cambios.id || empresaId || estudioActivo?.id)
+
+    const nuevoEstudio: EstudioInfo = {
+      ...(estudioActivo || DEFAULT_ESTUDIO_ACTIVO),
+      ...cambios,
+      ...(IS_SINGLE_TENANT && SINGLE_TENANT_ID ? { id: SINGLE_TENANT_ID } : {}),
+      portada_url:
+        cambios.portada_url !== undefined
+          ? (cambios.portada_url || null)
+          : (estudioActivo?.portada_url || null),
+    }
+
+    setEstudioActivoState(nuevoEstudio)
+
+    if (cambios.nombre) {
+      setStudioName(cambios.nombre)
+    }
+    if (cambios.logo_url !== undefined) {
+      setLogoUrl(cambios.logo_url || null)
+    }
+    if (cambios.portada_url !== undefined) {
+      setPortadaUrl(cambios.portada_url || null)
+    }
+    if (cambios.color_primario) {
+      setCustomPrimaryColor(cambios.color_primario)
+    }
+    if (cambios.id && (!IS_SINGLE_TENANT || cambios.id === SINGLE_TENANT_ID)) {
+      setEmpresaIdState(cambios.id)
+    }
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('rtc_estudio_activo', JSON.stringify(nuevoEstudio))
+      if (cambios.id && (!IS_SINGLE_TENANT || cambios.id === SINGLE_TENANT_ID)) {
+        localStorage.setItem('rtc_empresa_id', cambios.id)
+      }
+      if (cambios.nombre) localStorage.setItem('rtc_studio_name', cambios.nombre)
+      if (cambios.portada_url !== undefined) {
+        if (cambios.portada_url) localStorage.setItem('rtc_portada_url', cambios.portada_url)
+        else localStorage.removeItem('rtc_portada_url')
+      }
+    }
+
+    if (targetId) {
+      try {
+        await empresasService.actualizarConfiguracionEstudio(targetId, {
+          ...(cambios.nombre !== undefined && { nombre: cambios.nombre }),
+          ...(cambios.color_primario !== undefined && { color_primario: cambios.color_primario || undefined }),
+          ...(cambios.color_secundario !== undefined && { color_secundario: cambios.color_secundario || undefined }),
+          ...(cambios.capacidad_sala !== undefined && { capacidad_sala: cambios.capacidad_sala }),
+          ...(cambios.logo_url !== undefined && { logo_url: cambios.logo_url || undefined }),
+          ...(cambios.portada_url !== undefined && { portada_url: cambios.portada_url }),
+          ...(cambios.direccion !== undefined && { direccion: cambios.direccion || undefined }),
+          ...(cambios.telefono !== undefined && { telefono: cambios.telefono || undefined }),
+          ...(cambios.email !== undefined && { email: cambios.email || undefined }),
+        })
+      } catch (err) {
+        console.warn('Error al persistir cambios del estudio en Supabase:', err)
+      }
     }
   }
 
   return (
     <BrandingContext.Provider
       value={{
+        isSingleTenant: IS_SINGLE_TENANT,
+        singleTenantId: SINGLE_TENANT_ID,
         studioName,
         setStudioName: (name: string) => {
           setStudioName(name)
@@ -728,12 +939,15 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setCustomPrimaryColor,
         logoUrl,
         setLogoUrl,
+        portadaUrl,
+        setPortadaUrl,
         isDarkMode,
         toggleDarkMode,
         empresaId,
         setEmpresaId,
         estudioActivo,
         setEstudioActivo,
+        actualizarEstudio,
         verticalConfig,
       }}
     >

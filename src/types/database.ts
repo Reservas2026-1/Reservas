@@ -31,6 +31,7 @@ export interface Database {
           email: string | null
           direccion: string | null
           logo_url: string | null
+          portada_url: string | null
           color_primario: string | null
           color_secundario: string | null
           capacidad_sala: number
@@ -48,6 +49,7 @@ export interface Database {
           email?: string | null
           direccion?: string | null
           logo_url?: string | null
+          portada_url?: string | null
           color_primario?: string | null
           color_secundario?: string | null
           capacidad_sala?: number
@@ -65,6 +67,7 @@ export interface Database {
           email?: string | null
           direccion?: string | null
           logo_url?: string | null
+          portada_url?: string | null
           color_primario?: string | null
           color_secundario?: string | null
           capacidad_sala?: number
@@ -84,6 +87,10 @@ export interface Database {
           telefono: string | null
           rol: RolUsuario
           avatar_url: string | null
+          codigo_qr?: string | null
+          fecha_nacimiento?: string | null
+          contacto_emergencia?: string | null
+          objetivos_entrenamiento?: string | null
           activo: boolean
           created_at: string
           updated_at: string | null
@@ -97,6 +104,10 @@ export interface Database {
           telefono?: string | null
           rol?: RolUsuario
           avatar_url?: string | null
+          codigo_qr?: string | null
+          fecha_nacimiento?: string | null
+          contacto_emergencia?: string | null
+          objetivos_entrenamiento?: string | null
           activo?: boolean
           created_at?: string
           updated_at?: string | null
@@ -110,6 +121,10 @@ export interface Database {
           telefono?: string | null
           rol?: RolUsuario
           avatar_url?: string | null
+          codigo_qr?: string | null
+          fecha_nacimiento?: string | null
+          contacto_emergencia?: string | null
+          objetivos_entrenamiento?: string | null
           activo?: boolean
           created_at?: string
           updated_at?: string | null
@@ -185,6 +200,7 @@ export interface Database {
           fecha_adquisicion: string
           fecha_vencimiento: string
           estado: EstadoTiquetera
+          premio_entregado: boolean
           created_at: string
           updated_at: string | null
         }
@@ -198,6 +214,7 @@ export interface Database {
           fecha_adquisicion?: string
           fecha_vencimiento: string
           estado?: EstadoTiquetera
+          premio_entregado?: boolean
           created_at?: string
           updated_at?: string | null
         }
@@ -211,6 +228,7 @@ export interface Database {
           fecha_adquisicion?: string
           fecha_vencimiento?: string
           estado?: EstadoTiquetera
+          premio_entregado?: boolean
           created_at?: string
           updated_at?: string | null
         }
@@ -745,6 +763,165 @@ export interface Database {
           }
         ]
       }
+      reglas_xp: {
+        Row: {
+          id: string
+          empresa_id: string
+          criterio: string
+          puntos_xp: number
+          descripcion: string | null
+          activo: boolean
+          created_at: string
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          empresa_id: string
+          criterio: string
+          puntos_xp?: number
+          descripcion?: string | null
+          activo?: boolean
+          created_at?: string
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          empresa_id?: string
+          criterio?: string
+          puntos_xp?: number
+          descripcion?: string | null
+          activo?: boolean
+          created_at?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'reglas_xp_empresa_id_fkey'
+            columns: ['empresa_id']
+            isOneToOne: false
+            referencedRelation: 'empresas'
+            referencedColumns: ['id']
+          }
+        ]
+      }
+      metricas_gamificacion: {
+        Row: {
+          id: string
+          usuario_id: string
+          empresa_id: string | null
+          tiquetera_id: string | null
+          puntos_acumulados: number
+          potencia_promedio_watts: number
+          ranking_clase: number
+          dias_programados: number
+          dias_cumplidos: number
+          bono_plan_otorgado: boolean
+          premio_entregado: boolean
+          created_at: string
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          usuario_id: string
+          empresa_id?: string | null
+          tiquetera_id?: string | null
+          puntos_acumulados?: number
+          potencia_promedio_watts?: number
+          ranking_clase?: number
+          dias_programados?: number
+          dias_cumplidos?: number
+          bono_plan_otorgado?: boolean
+          premio_entregado?: boolean
+          created_at?: string
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          usuario_id?: string
+          empresa_id?: string | null
+          tiquetera_id?: string | null
+          puntos_acumulados?: number
+          potencia_promedio_watts?: number
+          ranking_clase?: number
+          dias_programados?: number
+          dias_cumplidos?: number
+          bono_plan_otorgado?: boolean
+          premio_entregado?: boolean
+          created_at?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'metricas_gamificacion_usuario_id_fkey'
+            columns: ['usuario_id']
+            isOneToOne: false
+            referencedRelation: 'perfiles'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'metricas_gamificacion_empresa_id_fkey'
+            columns: ['empresa_id']
+            isOneToOne: false
+            referencedRelation: 'empresas'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'metricas_gamificacion_tiquetera_id_fkey'
+            columns: ['tiquetera_id']
+            isOneToOne: false
+            referencedRelation: 'tiqueteras'
+            referencedColumns: ['id']
+          }
+        ]
+      }
+      premios_plan: {
+        Row: {
+          id: string
+          empresa_id: string
+          plan_id: string | null
+          puesto: number
+          premio: string
+          icono: string | null
+          activo: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          empresa_id: string
+          plan_id?: string | null
+          puesto: number
+          premio: string
+          icono?: string | null
+          activo?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          empresa_id?: string
+          plan_id?: string | null
+          puesto?: number
+          premio?: string
+          icono?: string | null
+          activo?: boolean
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'premios_plan_empresa_id_fkey'
+            columns: ['empresa_id']
+            isOneToOne: false
+            referencedRelation: 'empresas'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'premios_plan_plan_id_fkey'
+            columns: ['plan_id']
+            isOneToOne: false
+            referencedRelation: 'planes'
+            referencedColumns: ['id']
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -887,8 +1064,35 @@ export interface InscribirListaEsperaResponse {
   error?: string
 }
 
+// Helpers tipados para tiqueteras
+export type TiqueteraRow = Tables<'tiqueteras'>
+export type TiqueteraInsert = TablesInsert<'tiqueteras'>
+export type TiqueteraUpdate = TablesUpdate<'tiqueteras'>
+
 // Helpers tipados para lista_espera
 export type ListaEsperaRow = Tables<'lista_espera'>
 export type ListaEsperaInsert = TablesInsert<'lista_espera'>
 export type ListaEsperaUpdate = TablesUpdate<'lista_espera'>
+
+// Helpers tipados para reglas_xp
+export type ReglasXpRow = Tables<'reglas_xp'>
+export type ReglasXpInsert = TablesInsert<'reglas_xp'>
+export type ReglasXpUpdate = TablesUpdate<'reglas_xp'>
+
+// Helpers tipados para metricas_gamificacion
+export type MetricasGamificacionRow = Tables<'metricas_gamificacion'>
+export type MetricasGamificacionInsert = TablesInsert<'metricas_gamificacion'>
+export type MetricasGamificacionUpdate = TablesUpdate<'metricas_gamificacion'>
+
+// Helpers tipados para premios_plan
+export type PremiosPlanRow = Tables<'premios_plan'>
+export type PremiosPlanInsert = TablesInsert<'premios_plan'>
+export type PremiosPlanUpdate = TablesUpdate<'premios_plan'>
+
+// Helpers tipados para empresas
+export type EmpresaRow = Tables<'empresas'>
+export type EmpresaInsert = TablesInsert<'empresas'>
+export type EmpresaUpdate = TablesUpdate<'empresas'>
+
+
 

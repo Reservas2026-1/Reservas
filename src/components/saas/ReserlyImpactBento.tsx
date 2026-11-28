@@ -7,9 +7,6 @@ import {
   BarChart3,
   TrendingUp,
   CheckCircle2,
-  CalendarCheck,
-  Clock,
-  QrCode,
 } from 'lucide-react'
 import {
   Card,
@@ -53,82 +50,21 @@ const PAYMENT_CHANNELS: PaymentChannelBar[] = [
 ]
 
 /**
- * Franja oscura de métricas de impacto y sección Bento "Automatización que reduce ausencias".
+ * Sección Bento Grid "Automatización que reduce ausencias".
  */
 export const ReserlyImpactBento: React.FC = () => {
   return (
-    <section className="py-12 lg:py-20 bg-white dark:bg-slate-950 transition-colors">
-      <div className="px-4 sm:px-6 lg:px-8">
-        {/* Franja oscura de impacto */}
-        <div className="bg-slate-900 text-white rounded-3xl max-w-7xl mx-auto my-12 p-8 sm:p-12 border border-slate-800 shadow-2xl relative overflow-hidden">
-          <div className="absolute -top-24 -right-24 w-72 h-72 bg-red-600/20 blur-3xl rounded-full pointer-events-none" />
-          <div className="absolute -bottom-24 -left-24 w-72 h-72 bg-rose-600/15 blur-3xl rounded-full pointer-events-none" />
-
-          <div className="relative z-10 grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-0 md:divide-x md:divide-slate-800">
-            {/* Métrica 1 */}
-            <div className="flex flex-col items-center md:items-start text-center md:text-left md:pr-8 space-y-2">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 border border-red-500/30 text-red-400 text-[11px] font-bold uppercase tracking-wider">
-                <CalendarCheck className="w-3.5 h-3.5" />
-                <span>Volumen Comprobado</span>
-              </div>
-              <p className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight">
-                <span className="text-red-500">+</span>15,000
-              </p>
-              <p className="text-base sm:text-lg font-bold text-white">
-                Reservas procesadas
-              </p>
-              <p className="text-xs sm:text-sm text-slate-400 leading-relaxed max-w-xs">
-                Cupos, clases y citas confirmadas de forma automática sin choques ni planillas.
-              </p>
-            </div>
-
-            {/* Métrica 2 */}
-            <div className="flex flex-col items-center md:items-start text-center md:text-left pt-6 md:pt-0 md:px-8 space-y-2 border-t border-slate-800 md:border-t-0">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 border border-red-500/30 text-red-400 text-[11px] font-bold uppercase tracking-wider">
-                <Clock className="w-3.5 h-3.5" />
-                <span>Autogestión 24/7</span>
-              </div>
-              <p className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight">
-                42<span className="text-red-500">%</span>
-              </p>
-              <p className="text-base sm:text-lg font-bold text-white">
-                Reservas fuera de horario
-              </p>
-              <p className="text-xs sm:text-sm text-slate-400 leading-relaxed max-w-xs">
-                Tus clientes reservan de noche o en fin de semana mientras tu recepción descansa.
-              </p>
-            </div>
-
-            {/* Métrica 3 */}
-            <div className="flex flex-col items-center md:items-start text-center md:text-left pt-6 md:pt-0 md:pl-8 space-y-2 border-t border-slate-800 md:border-t-0">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 border border-red-500/30 text-red-400 text-[11px] font-bold uppercase tracking-wider">
-                <QrCode className="w-3.5 h-3.5" />
-                <span>Ingreso Exprés</span>
-              </div>
-              <p className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight">
-                <span className="text-red-500">&lt;</span>2 seg
-              </p>
-              <p className="text-base sm:text-lg font-bold text-white">
-                Validación con código QR
-              </p>
-              <p className="text-xs sm:text-sm text-slate-400 leading-relaxed max-w-xs">
-                Escaneo instantáneo en puerta para verificar pago, tiquetera vigente y puesto asignado.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
+    <section className="py-10 md:py-16 bg-white dark:bg-[#070B14] transition-colors">
       {/* Sección Bento Grid: Automatización que reduce ausencias */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-8">
-        <div className="text-center max-w-3xl mx-auto mb-12 space-y-4">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center max-w-3xl mx-auto mb-10 space-y-3">
           <span className="inline-block px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400">
             Operación Inteligente
           </span>
-          <h2 className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tight">
+          <h2 className="text-2xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tight">
             Automatización que reduce ausencias
           </h2>
-          <p className="text-base sm:text-lg text-slate-600 dark:text-slate-300">
+          <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300">
             Recordatorios automáticos, control preciso de créditos y pagos en
             tiempo real para mantener tus sesiones llenas sin esfuerzo manual.
           </p>
@@ -137,7 +73,7 @@ export const ReserlyImpactBento: React.FC = () => {
         {/* Bento Grid de 3 tarjetas visuales sin imágenes externas */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* Tarjeta 1: Notificación WhatsApp / Email */}
-          <Card className="rounded-3xl border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900 shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col justify-between overflow-hidden">
+          <Card className="rounded-3xl border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0F172A] shadow-xs hover:shadow-xl transition-all duration-300 flex flex-col justify-between overflow-hidden">
             <CardHeader className="p-6 pb-4">
               <div className="flex items-center justify-between gap-3 mb-2">
                 <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
@@ -204,7 +140,7 @@ export const ReserlyImpactBento: React.FC = () => {
           </Card>
 
           {/* Tarjeta 2: Saldo de tiquetera / créditos con barra de progreso */}
-          <Card className="rounded-3xl border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900 shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col justify-between overflow-hidden">
+          <Card className="rounded-3xl border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0F172A] shadow-xs hover:shadow-xl transition-all duration-300 flex flex-col justify-between overflow-hidden">
             <CardHeader className="p-6 pb-4">
               <div className="flex items-center justify-between gap-3 mb-2">
                 <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400 flex items-center justify-center">
@@ -282,7 +218,7 @@ export const ReserlyImpactBento: React.FC = () => {
           </Card>
 
           {/* Tarjeta 3: Mini gráfico de barras de pagos en tiempo real */}
-          <Card className="md:col-span-2 lg:col-span-1 rounded-3xl border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900 shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col justify-between overflow-hidden">
+          <Card className="md:col-span-2 lg:col-span-1 rounded-3xl border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0F172A] shadow-xs hover:shadow-xl transition-all duration-300 flex flex-col justify-between overflow-hidden">
             <CardHeader className="p-6 pb-4">
               <div className="flex items-center justify-between gap-3 mb-2">
                 <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400 flex items-center justify-center">

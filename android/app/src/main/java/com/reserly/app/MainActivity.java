@@ -1,4 +1,4 @@
-package com.reservas.indoorcycling;
+package com.reserly.app;
 
 import com.getcapacitor.BridgeActivity;
 

@@ -1,20 +1,20 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
-  User,
   Rocket,
   Sun,
   Moon,
   ArrowRight,
+  ArrowLeft,
   CheckCircle2,
   Calendar,
   CreditCard,
   Users,
   Clock,
-  Sparkles,
   Check,
   ChevronUp,
   ChevronDown,
-  X,
+  ChevronLeft,
+  ChevronRight,
   Activity,
   Layers,
   HeartPulse,
@@ -28,12 +28,16 @@ import {
 import { useBranding } from '@/context/BrandingContext'
 import { AuthView } from '@/components/auth/AuthView'
 import type { Tables } from '@/types/database'
+import { ReserlyLogo } from './ReserlyLogo'
 import { ReserlyModulesViewer } from './ReserlyModulesViewer'
 import { ReserlyImpactBento } from './ReserlyImpactBento'
+import { ReserlyPhoneMockup } from './ReserlyPhoneMockup'
+import { ScrollReveal } from './ScrollReveal'
 
 interface LandingReserlyViewProps {
   onAuthSuccess: (userProfile: Tables<'perfiles'> | null) => void
   onSkipToDemo: (rol: 'cliente' | 'admin') => void
+  onBackToAuth?: () => void
 }
 
 type VerticalRubro =
@@ -239,6 +243,7 @@ const VERTICALES: VerticalItem[] = [
 export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
   onAuthSuccess,
   onSkipToDemo,
+  onBackToAuth,
 }) => {
   const { isDarkMode, toggleDarkMode } = useBranding()
   const [isAuthOpen, setIsAuthOpen] = useState(false)
@@ -253,8 +258,49 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
 
   const [activeSection, setActiveSection] = useState<string>('inicio')
 
+  const verticalCarouselRef = useRef<HTMLDivElement>(null)
+  const verticalTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  const activeVerticalIndex = VERTICALES.findIndex((v) => v.id === selectedRubro)
   const activeVertical =
     VERTICALES.find((v) => v.id === selectedRubro) || VERTICALES[0]
+
+  // Reiniciar el temporizador de 10 segundos para el carrusel de verticales
+  const resetVerticalTimer = useCallback(() => {
+    if (verticalTimerRef.current) {
+      clearInterval(verticalTimerRef.current)
+    }
+    verticalTimerRef.current = setInterval(() => {
+      setSelectedRubro((prevRubro) => {
+        const curIdx = VERTICALES.findIndex((v) => v.id === prevRubro)
+        const nextIdx = (curIdx + 1) % VERTICALES.length
+        return VERTICALES[nextIdx].id
+      })
+    }, 10000)
+  }, [])
+
+  useEffect(() => {
+    resetVerticalTimer()
+    return () => {
+      if (verticalTimerRef.current) {
+        clearInterval(verticalTimerRef.current)
+      }
+    }
+  }, [resetVerticalTimer])
+
+  // Desplazar automáticamente la tarjeta activa visible en el carrusel
+  useEffect(() => {
+    if (verticalCarouselRef.current && activeVerticalIndex >= 0) {
+      const container = verticalCarouselRef.current
+      const card = container.children[activeVerticalIndex] as HTMLElement
+      if (card) {
+        const containerLeft = container.getBoundingClientRect().left
+        const cardLeft = card.getBoundingClientRect().left
+        const offset = cardLeft - containerLeft - 16
+        container.scrollBy({ left: offset, behavior: 'smooth' })
+      }
+    }
+  }, [activeVerticalIndex])
 
   const handleSelectRubro = (rubroId: VerticalRubro) => {
     if (selectedRubro === rubroId) {
@@ -263,6 +309,21 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
       setSelectedRubro(rubroId)
       setIsVerticalPanelOpen(true)
     }
+    resetVerticalTimer()
+  }
+
+  const handlePrevVertical = () => {
+    const prevIdx = (activeVerticalIndex - 1 + VERTICALES.length) % VERTICALES.length
+    setSelectedRubro(VERTICALES[prevIdx].id)
+    setIsVerticalPanelOpen(true)
+    resetVerticalTimer()
+  }
+
+  const handleNextVertical = () => {
+    const nextIdx = (activeVerticalIndex + 1) % VERTICALES.length
+    setSelectedRubro(VERTICALES[nextIdx].id)
+    setIsVerticalPanelOpen(true)
+    resetVerticalTimer()
   }
 
   useEffect(() => {
@@ -324,23 +385,18 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
   ]
 
   return (
-    <div className="min-h-screen bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans transition-colors duration-300">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#070B14] text-slate-900 dark:text-slate-100 font-sans transition-colors duration-300">
       {/* =========================================================================
-          1. HEADER NAVEGACIÓN
+          1. HEADER NAVEGACIÓN (Sin border-b para transición fluida con el Hero)
       ========================================================================= */}
-      <header className="sticky top-0 z-40 w-full bg-white/90 dark:bg-slate-950/90 backdrop-blur-md transition-colors">
+      <header className="sticky top-0 z-40 w-full bg-white/90 dark:bg-[#070B14]/90 backdrop-blur-md transition-colors">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-4">
-          {/* Logo a la izquierda */}
-          <div
+          {/* Logo con alto contraste para claro y oscuro */}
+          <ReserlyLogo
+            showSubtitle={true}
             onClick={() => scrollTo('inicio')}
-            className="flex items-center gap-3 cursor-pointer select-none"
-          >
-            <img
-              src="/LogoReserly.png"
-              alt="Reserly Logo"
-              className="h-12 sm:h-14 w-auto object-contain"
-            />
-          </div>
+            className="cursor-pointer"
+          />
 
           {/* Menú de navegación centrado con subrayado activo */}
           <nav className="hidden md:flex items-center gap-8 text-sm">
@@ -369,7 +425,7 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
               type="button"
               onClick={toggleDarkMode}
               aria-label="Cambiar modo de color"
-              className="p-2 sm:px-3 sm:py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all flex items-center gap-1.5 text-xs font-medium cursor-pointer"
+              className="p-2 sm:px-3 sm:py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0F172A] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all flex items-center gap-1.5 text-xs font-semibold cursor-pointer shadow-xs"
               title={isDarkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
             >
               {isDarkMode ? (
@@ -379,19 +435,32 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                 </>
               ) : (
                 <>
-                  <Moon className="w-4 h-4 text-slate-600" />
+                  <Moon className="w-4 h-4 text-slate-700" />
                   <span className="hidden sm:inline">Oscuro</span>
                 </>
               )}
             </button>
 
+            {/* Botón Volver a Iniciar Sesión si viene de app móvil nativa */}
+            {onBackToAuth && (
+              <button
+                type="button"
+                onClick={onBackToAuth}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-bold hover:bg-red-500/20 transition-all cursor-pointer shadow-xs"
+                title="Volver a la pantalla de acceso de la app"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Iniciar Sesión</span>
+              </button>
+            )}
+
             {/* Botón Acceso Clientes */}
             <button
               type="button"
               onClick={() => openAuthModal('signin')}
-              className="hidden sm:flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-400 shadow-xs transition-all cursor-pointer"
+              className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs sm:text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer shadow-2xs"
             >
-              <User className="w-4 h-4 text-red-600 dark:text-red-400" />
+              <Users className="w-4 h-4 text-slate-500" />
               <span>Acceso clientes</span>
             </button>
 
@@ -414,110 +483,86 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
         ========================================================================= */}
         <section
           id="inicio"
-          className="relative overflow-hidden pt-12 pb-20 lg:pt-20 lg:pb-28 bg-gradient-to-b from-red-50/40 via-white to-white dark:from-slate-950 dark:via-slate-950 dark:to-slate-900"
+          className="relative overflow-hidden pt-4 pb-10 sm:pt-10 sm:pb-16 md:pt-14 md:pb-18 bg-gradient-to-b from-slate-50/60 via-white to-white dark:from-[#070B14] dark:via-[#070B14] dark:to-[#0F172A]"
         >
-          {/* Ondas y resplandores ambientales de fondo */}
-          <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-red-500/10 dark:bg-red-600/10 blur-[130px] rounded-full pointer-events-none" />
-          <div className="absolute -bottom-10 left-10 w-[350px] h-[350px] bg-slate-300/20 dark:bg-slate-800/20 blur-[100px] rounded-full pointer-events-none" />
-
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-              {/* Columna Izquierda: Mensaje y Acciones */}
-              <div className="lg:col-span-5 space-y-6 text-center lg:text-left">
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-100 dark:bg-red-950/60 border border-red-200 dark:border-red-800/80 text-red-700 dark:text-red-400 text-xs font-semibold">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Plataforma SaaS Todo-en-Uno para Negocios de Servicios</span>
-                </div>
-
-                <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight text-slate-900 dark:text-white leading-[1.12]">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
+              {/* Columna Izquierda: Mensaje y Acciones en orden estricto móvil */}
+              <ScrollReveal direction="up" className="lg:col-span-5 space-y-4 sm:space-y-6 text-center lg:text-left">
+                {/* 1) Título equilibrado */}
+                <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-slate-900 dark:text-white leading-[1.14]">
                   Automatiza tus{' '}
                   <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-600 via-rose-600 to-red-500">
                     reservas y pagos
                   </span>
                 </h1>
 
-                <p className="text-lg sm:text-xl text-slate-600 dark:text-slate-300 max-w-xl mx-auto lg:mx-0 leading-relaxed font-normal">
+                {/* 2) En móvil (< lg): Tarjeta horizontal del navegador inmediatamente debajo del título */}
+                <div className="block lg:hidden my-3 sm:my-5">
+                  <ReserlyPhoneMockup />
+                </div>
+
+                {/* 3) Subtítulo más compacto */}
+                <p className="text-sm sm:text-lg leading-relaxed text-slate-600 dark:text-slate-300 max-w-xl mx-auto lg:mx-0 font-normal">
                   Gestiona horarios, clientes, espacios, clases y servicios desde
                   una sola plataforma intuitiva y optimizada para convertir visitantes
                   en reservas confirmadas.
                 </p>
 
-                {/* Botones de acción */}
-                <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4 pt-2">
+                {/* 4) Botones uno al lado del otro en móvil (grid-cols-2 gap-2.5) */}
+                <div className="grid grid-cols-2 gap-2.5 sm:flex sm:flex-row items-center justify-center lg:justify-start sm:gap-4 pt-1 sm:pt-2">
                   <button
                     type="button"
                     onClick={() => openAuthModal('register-studio')}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-base font-bold shadow-lg shadow-red-600/30 transition-all transform hover:-translate-y-0.5 active:translate-y-0 cursor-pointer"
+                    className="h-10 sm:h-auto text-xs sm:text-base font-semibold sm:font-bold px-3 sm:px-7 sm:py-3.5 rounded-xl bg-red-600 hover:bg-red-700 text-white shadow-md shadow-red-600/30 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <span>Prueba gratis</span>
-                    <ArrowRight className="w-5 h-5" />
+                    <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
                   </button>
 
                   <button
                     type="button"
                     onClick={() => scrollTo('precios')}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-base font-semibold shadow-xs transition-all cursor-pointer"
+                    className="h-10 sm:h-auto text-xs sm:text-base font-semibold px-3 sm:px-6 sm:py-3.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 shadow-2xs transition-all flex items-center justify-center cursor-pointer"
                   >
                     <span>Conoce los planes</span>
                   </button>
                 </div>
 
-                {/* Indicadores de confianza */}
-                <div className="pt-6 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-center lg:justify-start gap-6 text-xs text-slate-500 dark:text-slate-400">
+                {/* 5) Tres checks compactos y elegantes */}
+                <div className="pt-3 sm:pt-6 border-t border-slate-200/60 dark:border-slate-800/60 text-[11px] sm:text-xs flex flex-wrap justify-center lg:justify-start gap-x-4 gap-y-1 sm:gap-6 text-slate-600 dark:text-slate-400">
                   <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500 shrink-0" />
                     <span>Sin tarjeta requerida</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500 shrink-0" />
                     <span>Configuración en 5 minutos</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500 shrink-0" />
                     <span>Soporte prioritario en español</span>
                   </div>
                 </div>
-              </div>
+              </ScrollReveal>
 
-              {/* Columna Derecha: Imagen del Panel de Reservas ampliada y sin recuadro */}
-              <div className="lg:col-span-7 relative flex justify-center items-center">
-                <div className="relative w-full flex justify-center items-center">
-                  <img
-                    src={encodeURI('/Panel de Reservas Reserly_1.png')}
-                    alt="Panel de Reservas Reserly"
-                    className="w-full max-w-none lg:scale-110 lg:translate-x-4 object-contain mx-auto transition-transform duration-300 drop-shadow-md select-none"
-                    loading="eager"
-                  />
-
-                  {/* Badge flotante de reserva confirmada */}
-                  <div className="absolute -bottom-3 left-2 sm:bottom-4 sm:left-4 bg-white/95 dark:bg-slate-900/95 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 shadow-xl flex items-center gap-3 backdrop-blur-md z-10">
-                    <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 flex items-center justify-center shrink-0">
-                      <CheckCircle2 className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-900 dark:text-white">
-                        ¡Reserva Confirmada!
-                      </p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Bicicleta #07 • Pago Aprobado
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              {/* Columna Derecha en escritorio (>= lg): Mockup Tarjeta Horizontal */}
+              <ScrollReveal direction="up" delay={150} className="hidden lg:flex lg:col-span-7 relative justify-center items-center">
+                <ReserlyPhoneMockup />
+              </ScrollReveal>
             </div>
           </div>
         </section>
 
         {/* =========================================================================
-            3. SECCIÓN MULTI-VERTICAL (id="funciones")
+            3. SECCIÓN MULTI-VERTICAL (id="funciones") - CARRUSEL AUTOMÁTICO 10S
         ========================================================================= */}
         <section
           id="funciones"
-          className="py-20 lg:py-28 bg-slate-50 dark:bg-slate-900/60 border-y border-slate-200 dark:border-slate-800 transition-colors"
+          className="py-10 md:py-16 bg-slate-50 dark:bg-[#070B14] border-y border-slate-200 dark:border-slate-800 transition-colors"
         >
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center max-w-3xl mx-auto mb-14 space-y-4">
+            <ScrollReveal direction="up" className="text-center max-w-3xl mx-auto mb-10 sm:mb-12 space-y-4">
               <span className="inline-block px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400">
                 Multi-Industria & Especializada
               </span>
@@ -528,10 +573,66 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                 Ideal para estudios, gimnasios, centros de bienestar, salones,
                 consultorios y más. Cada vertical cuenta con flujos diseñados a la medida.
               </p>
+            </ScrollReveal>
+
+            {/* Barra de controles del carrusel: Flechas y Dots indicadores */}
+            <div className="flex items-center justify-between mb-4 px-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  {activeVerticalIndex + 1} de {VERTICALES.length}
+                </span>
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 hidden sm:inline">
+                  • {activeVertical.title}
+                </span>
+              </div>
+
+              {/* Controles de avance y puntos */}
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  {VERTICALES.map((rubro) => {
+                    const isSelected = selectedRubro === rubro.id
+                    return (
+                      <button
+                        key={rubro.id}
+                        type="button"
+                        onClick={() => handleSelectRubro(rubro.id)}
+                        aria-label={`Ver ${rubro.title}`}
+                        className={`transition-all duration-300 cursor-pointer ${
+                          isSelected
+                            ? 'w-6 h-2 bg-red-600 rounded-full shadow-xs'
+                            : 'w-2 h-2 bg-slate-300 dark:bg-slate-700 rounded-full hover:bg-slate-400'
+                        }`}
+                      />
+                    )
+                  })}
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={handlePrevVertical}
+                    aria-label="Vertical anterior"
+                    className="p-1.5 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors shadow-2xs cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNextVertical}
+                    aria-label="Vertical siguiente"
+                    className="p-1.5 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors shadow-2xs cursor-pointer"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
             </div>
 
-            {/* Cuadrícula de 6 tarjetas interactivas con fotografías reales */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+            {/* Carrusel horizontal continuo con snap manual y auto-avance */}
+            <div
+              ref={verticalCarouselRef}
+              className="overflow-x-auto snap-x snap-mandatory scrollbar-none flex gap-3.5 sm:gap-4 pb-3 pt-1 px-1 -mx-4 sm:mx-0 px-4 sm:px-0"
+            >
               {VERTICALES.map((rubro) => {
                 const isSelected = selectedRubro === rubro.id
                 return (
@@ -540,22 +641,25 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                     type="button"
                     onClick={() => handleSelectRubro(rubro.id)}
                     aria-expanded={isSelected && isVerticalPanelOpen}
-                    className={`relative h-52 sm:h-60 w-full rounded-3xl overflow-hidden border-2 text-left transition-all duration-300 group cursor-pointer ${isSelected
-                        ? 'border-red-600 ring-2 ring-red-600/40 shadow-xl scale-[1.03]'
+                    className={`relative h-56 sm:h-64 w-[74%] sm:w-[46%] md:w-[31%] lg:w-[calc(16.666%-14px)] shrink-0 snap-center rounded-3xl overflow-hidden border-2 text-left transition-all duration-300 group cursor-pointer ${
+                      isSelected
+                        ? 'border-red-600 ring-2 ring-red-600/40 shadow-xl scale-[1.02]'
                         : 'border-slate-200/80 dark:border-slate-800 hover:border-red-400 dark:hover:border-red-700 hover:scale-[1.01] shadow-md'
-                      }`}
+                    }`}
                   >
                     <img
                       src={rubro.image}
                       alt={rubro.title}
                       className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      loading="lazy"
                     />
                     {/* Degradado oscuro inferior para contraste óptimo */}
                     <div
-                      className={`absolute inset-0 bg-gradient-to-t transition-opacity duration-300 ${isSelected
+                      className={`absolute inset-0 bg-gradient-to-t transition-opacity duration-300 ${
+                        isSelected
                           ? 'from-slate-950/95 via-slate-950/50 to-black/15'
                           : 'from-slate-950/90 via-slate-950/45 to-black/10 group-hover:from-slate-950/95'
-                        }`}
+                      }`}
                     />
 
                     {/* Etiqueta superior de categoría */}
@@ -577,10 +681,11 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                       </p>
                       <div>
                         <span
-                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-bold transition-all duration-200 shadow-md ${isSelected
+                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-bold transition-all duration-200 shadow-md ${
+                            isSelected
                               ? 'bg-white text-red-600 ring-2 ring-red-500 shadow-red-600/30 translate-x-0.5'
                               : 'bg-white/95 text-slate-900 group-hover:bg-white group-hover:text-red-600 group-hover:ring-2 group-hover:ring-red-400/70 group-hover:shadow-lg group-hover:translate-x-0.5'
-                            }`}
+                          }`}
                         >
                           Ver módulo →
                         </span>
@@ -593,7 +698,7 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
 
             {/* Panel dinámico colapsable con las características de la vertical seleccionada */}
             {isVerticalPanelOpen ? (
-              <div className="mt-8 rounded-3xl border-2 border-red-500/30 dark:border-red-600/40 bg-white dark:bg-slate-900 p-6 sm:p-10 shadow-xl relative overflow-hidden">
+              <ScrollReveal direction="up" className="mt-8 rounded-3xl border-2 border-red-500/30 dark:border-red-600/40 bg-white dark:bg-slate-900 p-6 sm:p-10 shadow-xl relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-80 h-80 bg-red-500/5 dark:bg-red-600/10 rounded-full blur-3xl pointer-events-none" />
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
@@ -681,7 +786,7 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                     </div>
                   </div>
                 </div>
-              </div>
+              </ScrollReveal>
             ) : (
               <div className="mt-6 flex justify-center">
                 <button
@@ -698,7 +803,7 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
             )}
 
             {/* 4 Tarjetas horizontales de Beneficios Clave */}
-            <div className="mt-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <ScrollReveal direction="up" delay={100} className="mt-14 sm:mt-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 sm:gap-6">
               <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs hover:shadow-md transition-shadow">
                 <div className="w-12 h-12 rounded-xl bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400 flex items-center justify-center mb-4">
                   <Calendar className="w-6 h-6" />
@@ -750,16 +855,16 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                   tus clientes en un solo lugar seguro.
                 </p>
               </div>
-            </div>
+            </ScrollReveal>
           </div>
         </section>
 
         {/* =========================================================================
             4. SECCIÓN "ASÍ FUNCIONA RESERLY"
         ========================================================================= */}
-        <section className="py-20 lg:py-28 bg-white dark:bg-slate-950 transition-colors">
+        <section className="py-10 md:py-16 bg-white dark:bg-[#070B14] transition-colors">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center max-w-3xl mx-auto mb-16 space-y-4">
+            <ScrollReveal direction="up" className="text-center max-w-3xl mx-auto mb-12 sm:mb-16 space-y-4">
               <span className="inline-block px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400">
                 Flujo Operativo
               </span>
@@ -769,15 +874,17 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
               <p className="text-base sm:text-lg text-slate-600 dark:text-slate-300">
                 Una solución simple, rápida y efectiva para tu negocio.
               </p>
-            </div>
+            </ScrollReveal>
 
             {/* Visor interactivo ampliado con 5 pestañas de módulos del sistema */}
-            <ReserlyModulesViewer
-              onTryModule={() => openAuthModal('register-studio')}
-            />
+            <ScrollReveal direction="up" delay={100}>
+              <ReserlyModulesViewer
+                onTryModule={() => openAuthModal('register-studio')}
+              />
+            </ScrollReveal>
 
             {/* 3 Pasos numerados limpios con círculos rojos #DC2626 conectados por flechas */}
-            <div className="relative">
+            <ScrollReveal direction="up" delay={150} className="relative">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative z-10">
                 {/* Paso 1 */}
                 <div className="relative flex flex-col items-center text-center">
@@ -829,24 +936,26 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                   </p>
                 </div>
               </div>
-            </div>
+            </ScrollReveal>
           </div>
         </section>
 
         {/* =========================================================================
             4B. FRANJA DE IMPACTO Y AUTOMATIZACIÓN (BENTO GRID)
         ========================================================================= */}
-        <ReserlyImpactBento />
+        <ScrollReveal direction="up">
+          <ReserlyImpactBento />
+        </ScrollReveal>
 
         {/* =========================================================================
             5. SECCIÓN "PRECIOS" (id="precios")
         ========================================================================= */}
         <section
           id="precios"
-          className="py-20 lg:py-28 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-800 transition-colors"
+          className="py-10 md:py-16 bg-slate-50 dark:bg-[#070B14] border-t border-slate-200 dark:border-slate-800 transition-colors"
         >
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center max-w-3xl mx-auto mb-16 space-y-4">
+            <ScrollReveal direction="up" className="text-center max-w-3xl mx-auto mb-12 space-y-4">
               <span className="inline-block px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400">
                 Inversión Transparente
               </span>
@@ -856,11 +965,11 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
               <p className="text-base sm:text-lg text-slate-600 dark:text-slate-300">
                 Comienza sin riesgo y escala según la cantidad de sedes y volumen de reservas.
               </p>
-            </div>
+            </ScrollReveal>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
+            <ScrollReveal direction="up" delay={100} className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
               {/* Plan Básico */}
-              <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 flex flex-col justify-between shadow-xs hover:shadow-lg transition-all">
+              <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0F172A] p-8 flex flex-col justify-between shadow-xs hover:shadow-lg transition-all">
                 <div className="space-y-6">
                   <div>
                     <h3 className="text-xl font-bold text-slate-900 dark:text-white">
@@ -912,7 +1021,7 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
               </div>
 
               {/* Plan Pro (Destacado con borde rojo #DC2626) */}
-              <div className="relative rounded-3xl border-2 border-red-600 bg-white dark:bg-slate-900 p-8 flex flex-col justify-between shadow-2xl shadow-red-600/15 lg:-translate-y-3">
+              <div className="relative rounded-3xl border-2 border-red-600 bg-white dark:bg-[#0F172A] p-8 flex flex-col justify-between shadow-2xl shadow-red-600/15 lg:-translate-y-3">
                 {/* Badge Más Popular */}
                 <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-red-600 text-white text-[11px] font-black uppercase tracking-wider px-4 py-1 rounded-full shadow-md">
                   Más popular
@@ -977,7 +1086,7 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
               </div>
 
               {/* Plan Premium */}
-              <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 flex flex-col justify-between shadow-xs hover:shadow-lg transition-all">
+              <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0F172A] p-8 flex flex-col justify-between shadow-xs hover:shadow-lg transition-all">
                 <div className="space-y-6">
                   <div>
                     <h3 className="text-xl font-bold text-slate-900 dark:text-white">
@@ -1035,7 +1144,7 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                   </button>
                 </div>
               </div>
-            </div>
+            </ScrollReveal>
           </div>
         </section>
 
@@ -1045,10 +1154,10 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
         {/* Nosotros */}
         <section
           id="nosotros"
-          className="py-20 lg:py-28 bg-white dark:bg-slate-950 transition-colors"
+          className="py-10 md:py-16 bg-white dark:bg-[#070B14] transition-colors"
         >
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+            <ScrollReveal direction="up" className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
               {/* Imagen a la izquierda */}
               <div className="lg:col-span-6 flex justify-center">
                 <div className="relative w-full max-w-lg rounded-3xl overflow-hidden border-2 border-slate-200 dark:border-slate-800 shadow-xl group">
@@ -1056,6 +1165,7 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                     src="/Consulta_profesional.png"
                     alt="Equipo Reserly trabajando"
                     className="w-full h-80 sm:h-96 object-cover transform transition duration-500 group-hover:scale-105"
+                    loading="lazy"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
                 </div>
@@ -1084,32 +1194,33 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                   rentabilidad de cada clase, cabina o cita médica.
                 </p>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-                  <div>
-                    <p className="text-2xl font-black text-red-600">99.9%</p>
-                    <p className="text-xs text-slate-500">Disponibilidad de servicio</p>
+                {/* 3 Métricas compactadas en 3 columnas en móvil para evitar texto huérfano */}
+                <div className="grid grid-cols-3 gap-2 sm:gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+                  <div className="text-center sm:text-left">
+                    <p className="text-lg sm:text-2xl font-bold text-red-600">99.9%</p>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">Disponibilidad</p>
                   </div>
-                  <div>
-                    <p className="text-2xl font-black text-red-600">+15k</p>
-                    <p className="text-xs text-slate-500">Reservas procesadas</p>
+                  <div className="text-center sm:text-left">
+                    <p className="text-lg sm:text-2xl font-bold text-red-600">+15k</p>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">Reservas</p>
                   </div>
-                  <div>
-                    <p className="text-2xl font-black text-red-600">2 min</p>
-                    <p className="text-xs text-slate-500">Tiempo de confirmación</p>
+                  <div className="text-center sm:text-left">
+                    <p className="text-lg sm:text-2xl font-bold text-red-600">2 min</p>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground leading-tight">Confirmación</p>
                   </div>
                 </div>
               </div>
-            </div>
+            </ScrollReveal>
           </div>
         </section>
 
         {/* Banner Contáctanos (id="contacto") */}
         <section
           id="contacto"
-          className="py-16 bg-slate-50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-800 transition-colors"
+          className="py-10 md:py-16 bg-slate-50 dark:bg-[#070B14] border-t border-slate-200 dark:border-slate-800 transition-colors"
         >
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="rounded-3xl bg-gradient-to-r from-red-600 via-rose-600 to-red-700 p-8 sm:p-14 text-white shadow-2xl relative overflow-hidden">
+            <ScrollReveal direction="up" className="rounded-3xl bg-gradient-to-r from-red-600 via-rose-600 to-red-700 p-8 sm:p-14 text-white shadow-2xl relative overflow-hidden">
               <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full blur-3xl pointer-events-none" />
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center relative z-10">
@@ -1121,13 +1232,21 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                     ¿Tienes dudas o necesitas más información? Estamos listos para
                     ayudarte a implementar Reserly en tu empresa hoy mismo.
                   </p>
-                  <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 pt-2 text-xs font-medium text-red-100">
-                    <span className="flex items-center gap-1.5">
-                      <Mail className="w-4 h-4" /> contacto@reserly.com
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <Phone className="w-4 h-4" /> +57 (310) 123-4567
-                    </span>
+                  <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3 sm:gap-6 pt-2 text-xs font-medium text-red-100">
+                    <a
+                      href="mailto:contacto@reserly.com"
+                      className="flex items-center gap-1.5 hover:underline"
+                    >
+                      <Mail className="w-4 h-4 shrink-0" />
+                      <span>contacto@reserly.com</span>
+                    </a>
+                    <a
+                      href="tel:+573101234567"
+                      className="flex items-center gap-1.5 hover:underline"
+                    >
+                      <Phone className="w-4 h-4 shrink-0" />
+                      <span>+57 (310) 123-4567</span>
+                    </a>
                   </div>
                 </div>
 
@@ -1180,7 +1299,7 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
                   )}
                 </div>
               </div>
-            </div>
+            </ScrollReveal>
           </div>
         </section>
       </main>
@@ -1265,44 +1384,27 @@ export const LandingReserlyView: React.FC<LandingReserlyViewProps> = ({
       </footer>
 
       {/* =========================================================================
-          8. MODAL DE AUTENTICACIÓN / REGISTRO
+          8. VISTA A PANTALLA COMPLETA DE AUTENTICACIÓN / ONBOARDING
       ========================================================================= */}
       {isAuthOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-start justify-center p-4 sm:py-8"
-          onClick={() => setIsAuthOpen(false)}
+          className="fixed inset-0 z-50 overflow-y-auto bg-background animate-in fade-in duration-200"
         >
-          <div
-            className="w-full max-w-lg bg-card rounded-2xl shadow-2xl border border-border p-0 overflow-hidden relative my-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Botón cerrar modal */}
-            <button
-              type="button"
-              onClick={() => setIsAuthOpen(false)}
-              className="absolute top-3.5 right-3.5 z-20 p-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
-              aria-label="Cerrar modal"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            {/* AuthView con modos Iniciar Sesión / Alumno / Crear Estudio */}
-            <AuthView
-              initialMode={authInitialMode}
-              initialRubro={authInitialRubro}
-              onClose={() => setIsAuthOpen(false)}
-              onAuthSuccess={(profile) => {
-                setIsAuthOpen(false)
-                onAuthSuccess(profile)
-              }}
-              onSkipToDemo={(rol) => {
-                setIsAuthOpen(false)
-                onSkipToDemo(rol)
-              }}
-            />
-          </div>
+          <AuthView
+            initialMode={authInitialMode}
+            initialRubro={authInitialRubro}
+            onClose={() => setIsAuthOpen(false)}
+            onAuthSuccess={(profile) => {
+              setIsAuthOpen(false)
+              onAuthSuccess(profile)
+            }}
+            onSkipToDemo={(rol) => {
+              setIsAuthOpen(false)
+              onSkipToDemo(rol)
+            }}
+          />
         </div>
       )}
     </div>

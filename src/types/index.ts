@@ -23,6 +23,9 @@ export interface Empresa {
   email?: string
   direccion?: string
   logo_url?: string
+  portada_url?: string | null
+  color_primario?: string
+  color_secundario?: string
   activo: boolean
   created_at: string
   updated_at?: string
@@ -105,6 +108,33 @@ export interface MovimientoCaja {
   created_at: string
 }
 
+export interface PremioPlan {
+  id: string
+  empresa_id: string
+  plan_id?: string | null
+  puesto: number
+  premio: string
+  icono?: string | null
+  activo: boolean
+  created_at: string
+}
+
+export interface MetricasGamificacion {
+  id: string
+  usuario_id: string
+  empresa_id?: string | null
+  tiquetera_id?: string | null
+  puntos_acumulados: number
+  potencia_promedio_watts: number
+  ranking_clase: number
+  dias_programados: number
+  dias_cumplidos: number
+  bono_plan_otorgado: boolean
+  premio_entregado: boolean
+  created_at: string
+  updated_at?: string | null
+}
+
 export type {
   Database,
   Tables,
@@ -114,6 +144,9 @@ export type {
   RolUsuario,
   EstadoClase,
   EstadoTiquetera,
+  TiqueteraRow,
+  TiqueteraInsert,
+  TiqueteraUpdate,
   CrearReservaSeguraArgs,
   CrearReservaSeguraResponse,
   CancelarReservaSeguraArgs,
@@ -125,5 +158,17 @@ export type {
   EstadoListaEspera,
   ListaEsperaRow,
   ListaEsperaInsert,
+  ReglasXpRow,
+  ReglasXpInsert,
+  ReglasXpUpdate,
+  MetricasGamificacionRow,
+  MetricasGamificacionInsert,
+  MetricasGamificacionUpdate,
+  PremiosPlanRow,
+  PremiosPlanInsert,
+  PremiosPlanUpdate,
+  EmpresaRow,
+  EmpresaInsert,
+  EmpresaUpdate,
 } from './database'
 

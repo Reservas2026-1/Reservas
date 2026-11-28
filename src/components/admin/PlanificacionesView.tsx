@@ -1,5 +1,16 @@
-import { useEffect, useState, useCallback } from 'react'
-import { Loader2, CalendarDays, Sparkles, RefreshCw, Trash2, ClipboardList } from 'lucide-react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import {
+  Loader2,
+  CalendarDays,
+  Sparkles,
+  RefreshCw,
+  Trash2,
+  ClipboardList,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  X,
+} from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -27,8 +38,8 @@ import { HybridHourSelector } from '@/components/admin/HybridHourSelector'
 import {
   generarProgramacionMasiva,
   crearClaseEspecial,
-  ensureBicicletasForEmpresa,
 } from '@/services/clasesService'
+import { bicicletasService } from '@/services/bicicletasService'
 import { adminService, type ClaseAdminDetalle } from '@/services/adminService'
 import type { Tables } from '@/types/database'
 
@@ -72,6 +83,91 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
   const [clasesProgramadas, setClasesProgramadas] = useState<ClaseAdminDetalle[]>([])
   const [loadingClases, setLoadingClases] = useState<boolean>(true)
   const [eliminandoId, setEliminandoId] = useState<string | null>(null)
+
+  // Estados para Filtros y Paginación en "Clases Programadas Vigentes"
+  const [filtroFechaPuntual, setFiltroFechaPuntual] = useState<string>('')
+  const [filtroRango, setFiltroRango] = useState<'todas' | 'esta_semana' | 'este_mes'>('todas')
+  const [filtroTurno, setFiltroTurno] = useState<'todos' | 'am' | 'pm'>('todos')
+  const [busquedaTitulo, setBusquedaTitulo] = useState<string>('')
+  const [paginaActual, setPaginaActual] = useState<number>(1)
+  const ITEMS_PER_PAGE = 10
+
+  const isFilterActive = useMemo(() => {
+    return (
+      filtroFechaPuntual !== '' ||
+      filtroRango !== 'todas' ||
+      filtroTurno !== 'todos' ||
+      busquedaTitulo.trim() !== ''
+    )
+  }, [filtroFechaPuntual, filtroRango, filtroTurno, busquedaTitulo])
+
+  const handleLimpiarFiltros = useCallback(() => {
+    setFiltroFechaPuntual('')
+    setFiltroRango('todas')
+    setFiltroTurno('todos')
+    setBusquedaTitulo('')
+    setPaginaActual(1)
+  }, [])
+
+  const clasesFiltradas = useMemo(() => {
+    return clasesProgramadas.filter((clase) => {
+      // 1. Fecha puntual
+      if (filtroFechaPuntual && clase.fecha !== filtroFechaPuntual) {
+        return false
+      }
+
+      // 2. Rango rápido
+      if (!filtroFechaPuntual && filtroRango !== 'todas') {
+        const now = new Date()
+        if (filtroRango === 'esta_semana') {
+          const diaSemana = (now.getDay() + 6) % 7 // Lun = 0, Dom = 6
+          const startOfWeek = new Date(now)
+          startOfWeek.setDate(now.getDate() - diaSemana)
+          const endOfWeek = new Date(startOfWeek)
+          endOfWeek.setDate(startOfWeek.getDate() + 6)
+
+          const startIso = startOfWeek.toISOString().split('T')[0]
+          const endIso = endOfWeek.toISOString().split('T')[0]
+          if (clase.fecha < startIso || clase.fecha > endIso) {
+            return false
+          }
+        } else if (filtroRango === 'este_mes') {
+          const ano = now.getFullYear()
+          const mes = String(now.getMonth() + 1).padStart(2, '0')
+          const prefijoMes = `${ano}-${mes}`
+          if (!clase.fecha.startsWith(prefijoMes)) {
+            return false
+          }
+        }
+      }
+
+      // 3. Filtro por turno
+      if (filtroTurno !== 'todos') {
+        const hora = Number.parseInt(clase.hora_inicio?.slice(0, 2) || '0', 10)
+        if (filtroTurno === 'am' && hora >= 12) return false
+        if (filtroTurno === 'pm' && hora < 12) return false
+      }
+
+      // 4. Búsqueda por título
+      if (busquedaTitulo.trim()) {
+        const q = busquedaTitulo.trim().toLowerCase()
+        if (!clase.titulo.toLowerCase().includes(q)) {
+          return false
+        }
+      }
+
+      return true
+    })
+  }, [clasesProgramadas, filtroFechaPuntual, filtroRango, filtroTurno, busquedaTitulo])
+
+  const totalClasesFiltradas = clasesFiltradas.length
+  const totalPaginas = Math.max(1, Math.ceil(totalClasesFiltradas / ITEMS_PER_PAGE))
+  const paginaValida = Math.min(paginaActual, totalPaginas)
+
+  const clasesPaginadas = useMemo(() => {
+    const inicio = (paginaValida - 1) * ITEMS_PER_PAGE
+    return clasesFiltradas.slice(inicio, inicio + ITEMS_PER_PAGE)
+  }, [clasesFiltradas, paginaValida])
 
   const cargarHorariosYClases = useCallback(async () => {
     setLoadingHorarios(true)
@@ -169,16 +265,16 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
         return
       }
 
-      const syncRes = await ensureBicicletasForEmpresa(empresaId, capacidadObjetivo)
-      if (syncRes.error) {
-        console.warn('No se pudieron sincronizar las bicicletas para la programación:', syncRes.error)
+      const syncRes = await bicicletasService.sincronizarCapacidadSala(empresaId, capacidadObjetivo)
+      if (!syncRes.success && syncRes.error) {
+        console.warn('Aviso al sincronizar los puestos para la programación:', syncRes.error)
       }
 
       const count = res.data?.length || 0
       toast({
         variant: 'success',
-        title: 'Programación generada',
-        description: `Se crearon ${count} clases omitiendo domingos y festivos de Colombia.`,
+        title: 'Programación generada con éxito',
+        description: `Se crearon ${count} ${verticalConfig.sesionPlural.toLowerCase()} (excluyendo domingos y festivos). Sala y puestos sincronizados a ${capacidadObjetivo} ${verticalConfig.recursoPlural.toLowerCase()}.`,
       })
       cargarHorariosYClases()
     } catch (err) {
@@ -218,15 +314,15 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
         return
       }
 
-      const syncRes = await ensureBicicletasForEmpresa(empresaId, capacidadObjetivo)
-      if (syncRes.error) {
-        console.warn('No se pudieron sincronizar las bicicletas para la clase especial:', syncRes.error)
+      const syncRes = await bicicletasService.sincronizarCapacidadSala(empresaId, capacidadObjetivo)
+      if (!syncRes.success && syncRes.error) {
+        console.warn('Aviso al sincronizar los puestos para la clase especial:', syncRes.error)
       }
 
       toast({
         variant: 'success',
-        title: 'Clase especial agregada',
-        description: `Programada para el ${fechaStr} (${especialHoraInicio} - ${especialHoraFin}).`,
+        title: `${verticalConfig.sesionSingular} especial agregada`,
+        description: `Programada para el ${fechaStr} (${especialHoraInicio} - ${especialHoraFin}). Sala y puestos sincronizados a ${capacidadObjetivo} ${verticalConfig.recursoPlural.toLowerCase()}.`,
       })
       cargarHorariosYClases()
     } catch (err) {
@@ -262,7 +358,7 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-6 w-full">
       {/* Encabezado */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4">
         <div>
@@ -532,16 +628,139 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
         </CardContent>
       </Card>
 
-      {/* Tabla real de clases programadas */}
+      {/* Tabla real de clases programadas con Filtros y Paginación */}
       <Card className="border-border/80 shadow-sm">
-        <CardHeader className="p-5 pb-3 border-b flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-base">
-              {verticalConfig.sesionPlural} Programad{sesionMasculina ? 'os' : 'as'} Vigentes ({clasesProgramadas.length})
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Listado real en base de datos desde la fecha actual.
-            </CardDescription>
+        <CardHeader className="p-5 pb-4 border-b space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <span>
+                  {verticalConfig.sesionPlural} Programad{sesionMasculina ? 'os' : 'as'} Vigentes
+                </span>
+                <Badge variant="secondary" className="font-mono text-xs">
+                  {totalClasesFiltradas} de {clasesProgramadas.length}
+                </Badge>
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Listado organizado en base de datos desde la fecha actual con filtros y paginación.
+              </CardDescription>
+            </div>
+
+            {isFilterActive && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleLimpiarFiltros}
+                className="h-7 text-xs text-muted-foreground hover:text-foreground self-start sm:self-auto gap-1"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Limpiar filtros</span>
+              </Button>
+            )}
+          </div>
+
+          {/* Barra de Filtros Compacta y Responsiva */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 pt-2 border-t text-xs">
+            {/* Buscador por Título */}
+            <div className="md:col-span-4 relative">
+              <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Input
+                value={busquedaTitulo}
+                onChange={(e) => {
+                  setBusquedaTitulo(e.target.value)
+                  setPaginaActual(1)
+                }}
+                placeholder={`Buscar por título de ${verticalConfig.sesionSingular.toLowerCase()}...`}
+                className="h-8 pl-8 text-xs bg-muted/30"
+              />
+            </div>
+
+            {/* Selector de Fecha Puntual */}
+            <div className="md:col-span-3 flex items-center gap-1">
+              <Input
+                type="date"
+                value={filtroFechaPuntual}
+                onChange={(e) => {
+                  setFiltroFechaPuntual(e.target.value)
+                  setFiltroRango('todas')
+                  setPaginaActual(1)
+                }}
+                className="h-8 text-xs bg-muted/30"
+                title="Filtrar por fecha puntual"
+              />
+              {filtroFechaPuntual && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setFiltroFechaPuntual('')
+                    setPaginaActual(1)
+                  }}
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                  title="Limpiar fecha"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </Button>
+              )}
+            </div>
+
+            {/* Selector de Rango Rápido */}
+            <div className="md:col-span-3 flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-muted-foreground shrink-0 hidden lg:inline">Rango:</span>
+              <div className="inline-flex rounded-lg border bg-muted/30 p-0.5 text-xs w-full justify-between sm:justify-start">
+                {(['todas', 'esta_semana', 'este_mes'] as const).map((rango) => {
+                  const label = rango === 'todas' ? 'Todas' : rango === 'esta_semana' ? 'Esta semana' : 'Este mes'
+                  const activo = !filtroFechaPuntual && filtroRango === rango
+                  return (
+                    <button
+                      key={rango}
+                      type="button"
+                      onClick={() => {
+                        setFiltroRango(rango)
+                        setFiltroFechaPuntual('')
+                        setPaginaActual(1)
+                      }}
+                      className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
+                        activo
+                          ? 'bg-background text-foreground shadow-xs font-bold'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Filtro por Turno */}
+            <div className="md:col-span-2 flex items-center justify-end">
+              <div className="inline-flex rounded-lg border bg-muted/30 p-0.5 text-xs w-full justify-center">
+                {(['todos', 'am', 'pm'] as const).map((turno) => {
+                  const label = turno === 'todos' ? 'Todos' : turno === 'am' ? 'Mañana AM' : 'Noche PM'
+                  const activo = filtroTurno === turno
+                  return (
+                    <button
+                      key={turno}
+                      type="button"
+                      onClick={() => {
+                        setFiltroTurno(turno)
+                        setPaginaActual(1)
+                      }}
+                      className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
+                        activo
+                          ? 'bg-background text-foreground shadow-xs font-bold'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           </div>
         </CardHeader>
 
@@ -555,58 +774,110 @@ export default function PlanificacionesView({ empresaId: propEmpresaId }: Planif
               No hay {verticalConfig.sesionPlural.toLowerCase()} programad{sesionMasculina ? 'os' : 'as'} registrad
               {sesionMasculina ? 'os' : 'as'} aún.
             </div>
+          ) : clasesFiltradas.length === 0 ? (
+            <div className="p-8 text-center space-y-2">
+              <p className="text-xs text-muted-foreground">
+                No se encontraron {verticalConfig.sesionPlural.toLowerCase()} con los filtros aplicados.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleLimpiarFiltros}
+                className="h-8 text-xs font-semibold gap-1.5"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Limpiar filtros</span>
+              </Button>
+            </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">Fecha</TableHead>
-                  <TableHead className="text-xs">Horario</TableHead>
-                  <TableHead className="text-xs">{verticalConfig.sesionSingular}</TableHead>
-                  <TableHead className="text-xs">Ocupación ({verticalConfig.recursoCortoPlural})</TableHead>
-                  <TableHead className="text-xs text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {clasesProgramadas.map((clase) => (
-                  <TableRow key={clase.id} className="text-xs">
-                    <TableCell className="font-mono">{clase.fecha}</TableCell>
-                    <TableCell className="font-mono">
-                      {clase.hora_inicio.slice(0, 5)} - {clase.hora_fin.slice(0, 5)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold">{clase.titulo}</span>
-                        {clase.es_clase_especial && (
-                          <Badge variant="secondary" className="text-[10px]">
-                            Especial
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {clase.cuposOcupados} / {clase.capacidadTotal}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        disabled={eliminandoId === clase.id}
-                        onClick={() => handleEliminarClase(clase)}
-                        className="h-7 text-xs text-destructive hover:text-destructive gap-1"
-                      >
-                        {eliminandoId === clase.id ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Trash2 className="w-3.5 h-3.5" />
-                        )}
-                        <span>Eliminar</span>
-                      </Button>
-                    </TableCell>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">Fecha</TableHead>
+                    <TableHead className="text-xs">Horario</TableHead>
+                    <TableHead className="text-xs">{verticalConfig.sesionSingular}</TableHead>
+                    <TableHead className="text-xs">Ocupación ({verticalConfig.recursoCortoPlural})</TableHead>
+                    <TableHead className="text-xs text-right">Acciones</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {clasesPaginadas.map((clase) => (
+                    <TableRow key={clase.id} className="text-xs">
+                      <TableCell className="font-mono">{clase.fecha}</TableCell>
+                      <TableCell className="font-mono">
+                        {clase.hora_inicio.slice(0, 5)} - {clase.hora_fin.slice(0, 5)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold">{clase.titulo}</span>
+                          {clase.es_clase_especial && (
+                            <Badge variant="secondary" className="text-[10px]">
+                              Especial
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {clase.cuposOcupados} / {clase.capacidadTotal}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={eliminandoId === clase.id}
+                          onClick={() => handleEliminarClase(clase)}
+                          className="h-7 text-xs text-destructive hover:text-destructive gap-1"
+                        >
+                          {eliminandoId === clase.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>Eliminar</span>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              {/* Controles de Paginación */}
+              <div className="p-3.5 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs bg-muted/10">
+                <div className="text-muted-foreground text-center sm:text-left">
+                  Página <span className="font-bold text-foreground">{paginaValida}</span> de{' '}
+                  <span className="font-bold text-foreground">{totalPaginas}</span> (Total: {totalClasesFiltradas}{' '}
+                  {verticalConfig.sesionPlural.toLowerCase()})
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPaginaActual((p) => Math.max(1, p - 1))}
+                    disabled={paginaValida <= 1}
+                    className="h-8 text-xs gap-1"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Anterior</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPaginaActual((p) => Math.min(totalPaginas, p + 1))}
+                    disabled={paginaValida >= totalPaginas}
+                    className="h-8 text-xs gap-1"
+                  >
+                    <span>Siguiente</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

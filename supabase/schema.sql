@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS public.empresas (
     email VARCHAR(255),
     direccion TEXT,
     logo_url TEXT,
+    portada_url TEXT,
     color_primario VARCHAR(20) DEFAULT '#0f766e',
     color_secundario VARCHAR(20) DEFAULT '#0d9488',
     activo BOOLEAN DEFAULT true NOT NULL,
@@ -66,6 +67,10 @@ CREATE TABLE IF NOT EXISTS public.perfiles (
     telefono VARCHAR(50),
     rol public.rol_usuario DEFAULT 'cliente' NOT NULL,
     avatar_url TEXT,
+    codigo_qr VARCHAR(100) UNIQUE,
+    fecha_nacimiento DATE,
+    contacto_emergencia VARCHAR(255),
+    objetivos_entrenamiento TEXT,
     activo BOOLEAN DEFAULT true NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -97,6 +102,7 @@ CREATE TABLE IF NOT EXISTS public.tiqueteras (
     fecha_adquisicion TIMESTAMPTZ DEFAULT NOW() NOT NULL,
     fecha_vencimiento TIMESTAMPTZ NOT NULL,
     estado public.estado_tiquetera DEFAULT 'activa' NOT NULL,
+    premio_entregado BOOLEAN DEFAULT false NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -202,10 +208,52 @@ CREATE TABLE IF NOT EXISTS public.movimientos_caja (
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
+-- 12. TABLA: REGLAS XP (Gamificación y Criterios de Puntos Multi-tenant)
+CREATE TABLE IF NOT EXISTS public.reglas_xp (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    empresa_id UUID NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+    criterio VARCHAR(100) NOT NULL,
+    puntos_xp INTEGER NOT NULL DEFAULT 100,
+    descripcion TEXT,
+    activo BOOLEAN DEFAULT true NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 13. TABLA: MÉTRICAS DE GAMIFICACIÓN (Progreso de Usuarios, Potencia y Hábitos)
+CREATE TABLE IF NOT EXISTS public.metricas_gamificacion (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    usuario_id UUID NOT NULL REFERENCES public.perfiles(id) ON DELETE CASCADE,
+    empresa_id UUID REFERENCES public.empresas(id) ON DELETE CASCADE,
+    tiquetera_id UUID REFERENCES public.tiqueteras(id) ON DELETE SET NULL,
+    puntos_acumulados INTEGER NOT NULL DEFAULT 0,
+    potencia_promedio_watts DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ranking_clase INTEGER NOT NULL DEFAULT 0,
+    dias_programados INTEGER NOT NULL DEFAULT 0,
+    dias_cumplidos INTEGER NOT NULL DEFAULT 0,
+    bono_plan_otorgado BOOLEAN NOT NULL DEFAULT false,
+    premio_entregado BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 14. TABLA: PREMIOS PLAN (Premios de Liga por Plan / Gamificación)
+CREATE TABLE IF NOT EXISTS public.premios_plan (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    empresa_id UUID NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+    plan_id UUID REFERENCES public.planes(id) ON DELETE CASCADE,
+    puesto INTEGER NOT NULL CHECK (puesto IN (1, 2, 3)),
+    premio TEXT NOT NULL,
+    icono TEXT DEFAULT '🏆',
+    activo BOOLEAN DEFAULT true NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL
+);
+
 -- ==============================================================================
 -- ÍNDICES OPTIMIZADOS PARA CONSULTAS MULTI-TENANT Y REPORTES
 -- ==============================================================================
 CREATE INDEX IF NOT EXISTS idx_perfiles_empresa_rol ON public.perfiles(empresa_id, rol);
+CREATE INDEX IF NOT EXISTS idx_perfiles_codigo_qr ON public.perfiles(codigo_qr);
 CREATE INDEX IF NOT EXISTS idx_planes_empresa_activo ON public.planes(empresa_id, activo);
 CREATE INDEX IF NOT EXISTS idx_bicicletas_empresa_estado ON public.bicicletas(empresa_id, estado);
 CREATE INDEX IF NOT EXISTS idx_bicicletas_empresa_numero ON public.bicicletas(empresa_id, numero);
@@ -216,6 +264,15 @@ CREATE INDEX IF NOT EXISTS idx_reservas_clase ON public.reservas(clase_id);
 CREATE INDEX IF NOT EXISTS idx_reservas_cliente ON public.reservas(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_pagos_empresa_estado ON public.pagos(empresa_id, estado);
 CREATE INDEX IF NOT EXISTS idx_movimientos_caja_empresa_fecha ON public.movimientos_caja(empresa_id, fecha);
+CREATE INDEX IF NOT EXISTS idx_reglas_xp_empresa ON public.reglas_xp(empresa_id);
+CREATE INDEX IF NOT EXISTS idx_metricas_gamificacion_usuario ON public.metricas_gamificacion(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_metricas_gamificacion_empresa ON public.metricas_gamificacion(empresa_id);
+CREATE INDEX IF NOT EXISTS idx_metricas_gamificacion_premio ON public.metricas_gamificacion(empresa_id, premio_entregado);
+CREATE INDEX IF NOT EXISTS idx_tiqueteras_premio ON public.tiqueteras(empresa_id, premio_entregado);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_premios_plan_empresa_plan_puesto ON public.premios_plan (empresa_id, plan_id, puesto) WHERE plan_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_premios_plan_empresa_global_puesto ON public.premios_plan (empresa_id, puesto) WHERE plan_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_premios_plan_empresa ON public.premios_plan (empresa_id);
+CREATE INDEX IF NOT EXISTS idx_premios_plan_plan_id ON public.premios_plan (plan_id);
 
 -- ==============================================================================
 -- TRIGGER PARA SINCRONIZAR AUTH.USERS CON PUBLIC.PERFILES
@@ -230,12 +287,14 @@ DECLARE
     v_empresa_id UUID;
     v_rol public.rol_usuario;
     v_nombre VARCHAR;
+    v_codigo_qr VARCHAR;
 BEGIN
     v_empresa_id := NULLIF(new.raw_user_meta_data->>'empresa_id', '')::UUID;
     v_rol := COALESCE(NULLIF(new.raw_user_meta_data->>'rol', '')::public.rol_usuario, 'cliente');
     v_nombre := COALESCE(NULLIF(new.raw_user_meta_data->>'nombre_completo', ''), new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1));
+    v_codigo_qr := COALESCE(NULLIF(new.raw_user_meta_data->>'codigo_qr', ''), 'RESERLY-' || UPPER(SUBSTRING(new.id::text, 1, 8)));
 
-    INSERT INTO public.perfiles (id, empresa_id, email, nombre_completo, documento, telefono, rol, avatar_url)
+    INSERT INTO public.perfiles (id, empresa_id, email, nombre_completo, documento, telefono, rol, avatar_url, codigo_qr)
     VALUES (
         new.id,
         v_empresa_id,
@@ -244,11 +303,13 @@ BEGIN
         new.raw_user_meta_data->>'documento',
         new.raw_user_meta_data->>'telefono',
         v_rol,
-        new.raw_user_meta_data->>'avatar_url'
+        new.raw_user_meta_data->>'avatar_url',
+        v_codigo_qr
     )
     ON CONFLICT (id) DO UPDATE SET
         email = EXCLUDED.email,
         nombre_completo = EXCLUDED.nombre_completo,
+        codigo_qr = COALESCE(public.perfiles.codigo_qr, EXCLUDED.codigo_qr),
         updated_at = NOW();
 
     RETURN NEW;

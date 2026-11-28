@@ -90,6 +90,9 @@ ALTER TABLE public.tiqueteras ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reservas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pagos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.movimientos_caja ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.reglas_xp ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.metricas_gamificacion ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.premios_plan ENABLE ROW LEVEL SECURITY;
 
 -- ==============================================================================
 -- POLÍTICAS: EMPRESAS
@@ -334,4 +337,95 @@ WITH CHECK (public.is_admin_of_empresa(empresa_id));
 DROP POLICY IF EXISTS "Admin elimina movimientos de caja en su empresa" ON public.movimientos_caja;
 CREATE POLICY "Admin elimina movimientos de caja en su empresa" 
 ON public.movimientos_caja FOR DELETE 
+USING (public.is_admin_of_empresa(empresa_id));
+
+-- ==============================================================================
+-- POLÍTICAS: REGLAS XP (MULTI-TENANT)
+-- ==============================================================================
+DROP POLICY IF EXISTS "Lectura de reglas xp activas o por tenant" ON public.reglas_xp;
+CREATE POLICY "Lectura de reglas xp activas o por tenant" 
+ON public.reglas_xp FOR SELECT 
+USING (activo = true OR public.is_admin_of_empresa(empresa_id) OR public.is_superadmin());
+
+DROP POLICY IF EXISTS "Admin de empresa gestiona reglas_xp (INSERT)" ON public.reglas_xp;
+CREATE POLICY "Admin de empresa gestiona reglas_xp (INSERT)" 
+ON public.reglas_xp FOR INSERT 
+WITH CHECK (public.is_admin_of_empresa(empresa_id));
+
+DROP POLICY IF EXISTS "Admin de empresa gestiona reglas_xp (UPDATE)" ON public.reglas_xp;
+CREATE POLICY "Admin de empresa gestiona reglas_xp (UPDATE)" 
+ON public.reglas_xp FOR UPDATE 
+USING (public.is_admin_of_empresa(empresa_id))
+WITH CHECK (public.is_admin_of_empresa(empresa_id));
+
+DROP POLICY IF EXISTS "Admin de empresa gestiona reglas_xp (DELETE)" ON public.reglas_xp;
+CREATE POLICY "Admin de empresa gestiona reglas_xp (DELETE)" 
+ON public.reglas_xp FOR DELETE 
+USING (public.is_admin_of_empresa(empresa_id));
+
+-- ==============================================================================
+-- POLÍTICAS: MÉTRICAS DE GAMIFICACIÓN
+-- ==============================================================================
+DROP POLICY IF EXISTS "Ver métricas propias o staff de empresa" ON public.metricas_gamificacion;
+CREATE POLICY "Ver métricas propias o staff de empresa" 
+ON public.metricas_gamificacion FOR SELECT 
+USING (
+    usuario_id = auth.uid() 
+    OR (empresa_id IS NOT NULL AND public.is_staff_of_empresa(empresa_id))
+    OR public.is_superadmin()
+);
+
+DROP POLICY IF EXISTS "Insertar métricas propias o staff de empresa" ON public.metricas_gamificacion;
+CREATE POLICY "Insertar métricas propias o staff de empresa" 
+ON public.metricas_gamificacion FOR INSERT 
+WITH CHECK (
+    usuario_id = auth.uid() 
+    OR (empresa_id IS NOT NULL AND public.is_staff_of_empresa(empresa_id))
+    OR public.is_superadmin()
+);
+
+DROP POLICY IF EXISTS "Actualizar métricas propias o staff de empresa" ON public.metricas_gamificacion;
+CREATE POLICY "Actualizar métricas propias o staff de empresa" 
+ON public.metricas_gamificacion FOR UPDATE 
+USING (
+    usuario_id = auth.uid() 
+    OR (empresa_id IS NOT NULL AND public.is_staff_of_empresa(empresa_id))
+    OR public.is_superadmin()
+)
+WITH CHECK (
+    usuario_id = auth.uid() 
+    OR (empresa_id IS NOT NULL AND public.is_staff_of_empresa(empresa_id))
+    OR public.is_superadmin()
+);
+
+DROP POLICY IF EXISTS "Eliminar métricas admin de empresa" ON public.metricas_gamificacion;
+CREATE POLICY "Eliminar métricas admin de empresa" 
+ON public.metricas_gamificacion FOR DELETE 
+USING (
+    (empresa_id IS NOT NULL AND public.is_admin_of_empresa(empresa_id))
+    OR public.is_superadmin()
+);
+
+-- ==============================================================================
+-- POLÍTICAS: PREMIOS PLAN (LIGA / GAMIFICACIÓN POR PLAN)
+-- ==============================================================================
+DROP POLICY IF EXISTS "Lectura de premios_plan por empresa" ON public.premios_plan;
+CREATE POLICY "Lectura de premios_plan por empresa" 
+ON public.premios_plan FOR SELECT 
+USING (activo = true OR public.is_admin_of_empresa(empresa_id));
+
+DROP POLICY IF EXISTS "Admin de empresa gestiona premios_plan (INSERT)" ON public.premios_plan;
+CREATE POLICY "Admin de empresa gestiona premios_plan (INSERT)" 
+ON public.premios_plan FOR INSERT 
+WITH CHECK (public.is_admin_of_empresa(empresa_id));
+
+DROP POLICY IF EXISTS "Admin de empresa gestiona premios_plan (UPDATE)" ON public.premios_plan;
+CREATE POLICY "Admin de empresa gestiona premios_plan (UPDATE)" 
+ON public.premios_plan FOR UPDATE 
+USING (public.is_admin_of_empresa(empresa_id))
+WITH CHECK (public.is_admin_of_empresa(empresa_id));
+
+DROP POLICY IF EXISTS "Admin de empresa gestiona premios_plan (DELETE)" ON public.premios_plan;
+CREATE POLICY "Admin de empresa gestiona premios_plan (DELETE)" 
+ON public.premios_plan FOR DELETE 
 USING (public.is_admin_of_empresa(empresa_id));

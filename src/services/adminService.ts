@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { bicicletasService } from './bicicletasService'
 import {
   clasesService,
   type ActualizarClaseParams,
@@ -157,6 +158,65 @@ export interface PagoFiltradoDetallado extends Tables<'pagos'> {
   cliente: Tables<'perfiles'> | null
   plan: Tables<'planes'> | null
   reserva: Tables<'reservas'> | null
+}
+
+export type PeriodoDashboard = 'hoy' | '7dias' | '30dias' | '3meses'
+
+export interface KpisDashboardEjecutivo {
+  ingresosTotal: number
+  ingresosVariacion: number
+  reservasTotal: number
+  tasaAsistencia: number
+  ocupacionPromedio: number
+  clientesActivos: number
+  tiqueterasVigentes: number
+  planesPorVencer: number
+}
+
+export interface PuntoGraficaIngresosReservas {
+  fecha: string
+  label: string
+  ingresos: number
+  reservas: number
+}
+
+export interface FranjaHoraPico {
+  hora: string
+  reservas: number
+  esPico: boolean
+}
+
+export interface RendimientoPlanItem {
+  planId: string
+  nombre: string
+  ventas: number
+  ingresos: number
+  porcentaje: number
+}
+
+export interface DesgloseEstadosReservas {
+  confirmadas: number
+  asistidas: number
+  pendientes: number
+  canceladas: number
+}
+
+export interface TopClienteItem {
+  usuarioId: string
+  nombre: string
+  email: string
+  avatarUrl?: string
+  asistencias: number
+  xpTotal: number
+}
+
+export interface MetricasDashboardEjecutivo {
+  kpis: KpisDashboardEjecutivo
+  graficaIngresosReservas: PuntoGraficaIngresosReservas[]
+  horasPico: FranjaHoraPico[]
+  rendimientoPlanes: RendimientoPlanItem[]
+  desgloseEstados: DesgloseEstadosReservas
+  topClientes: TopClienteItem[]
 }
 
 const PERIODOS_ESTADISTICAS = new Set<PeriodoEstadisticas>(['semana', 'mes', 'anio'])
@@ -594,9 +654,538 @@ export interface CierreCajaResumen {
 }
 
 /**
+ * Obtiene las métricas integrales y estructuradas para el Dashboard Administrativo Ejecutivo.
+ * @param empresaId ID de la empresa/estudio a consultar
+ * @param periodo Ventana de tiempo: 'hoy' | '7dias' | '30dias' | '3meses'
+ */
+export async function obtenerMetricasDashboardEjecutivo(
+  empresaId: string,
+  periodo: PeriodoDashboard = '30dias'
+): Promise<MetricasDashboardEjecutivo> {
+  const defaultRespuesta: MetricasDashboardEjecutivo = {
+    kpis: {
+      ingresosTotal: 0,
+      ingresosVariacion: 0,
+      reservasTotal: 0,
+      tasaAsistencia: 0,
+      ocupacionPromedio: 0,
+      clientesActivos: 0,
+      tiqueterasVigentes: 0,
+      planesPorVencer: 0,
+    },
+    graficaIngresosReservas: [],
+    horasPico: [],
+    rendimientoPlanes: [],
+    desgloseEstados: {
+      confirmadas: 0,
+      asistidas: 0,
+      pendientes: 0,
+      canceladas: 0,
+    },
+    topClientes: [],
+  }
+
+  try {
+    const targetEmpresaId = (await resolveEmpresaId(empresaId)) || empresaId
+    if (!targetEmpresaId) {
+      return defaultRespuesta
+    }
+
+    const ahora = new Date()
+    const hoy = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate())
+    const hoyStr = formatLocalDate(hoy)
+
+    let fechaInicioStr: string
+    const fechaFinStr = hoyStr
+    let inicioIso: string
+    const finIso = toLocalBoundaryIso(fechaFinStr, true)
+
+    let anteriorInicioIso: string
+    let anteriorFinIso: string
+
+    const buckets: PuntoGraficaIngresosReservas[] = []
+
+    if (periodo === 'hoy') {
+      fechaInicioStr = hoyStr
+      inicioIso = toLocalBoundaryIso(hoyStr, false)
+
+      const ayer = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 1)
+      const ayerStr = formatLocalDate(ayer)
+      anteriorInicioIso = toLocalBoundaryIso(ayerStr, false)
+      anteriorFinIso = toLocalBoundaryIso(ayerStr, true)
+
+      // Franjas de hoy de 06:00 a 22:00
+      for (let h = 6; h <= 22; h++) {
+        const horaStr = `${String(h).padStart(2, '0')}:00`
+        buckets.push({
+          fecha: `${hoyStr} ${horaStr}`,
+          label: horaStr,
+          ingresos: 0,
+          reservas: 0,
+        })
+      }
+    } else if (periodo === '7dias') {
+      const hace6Dias = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 6)
+      fechaInicioStr = formatLocalDate(hace6Dias)
+      inicioIso = toLocalBoundaryIso(fechaInicioStr, false)
+
+      const hace13Dias = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 13)
+      const hace7Dias = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 7)
+      anteriorInicioIso = toLocalBoundaryIso(formatLocalDate(hace13Dias), false)
+      anteriorFinIso = toLocalBoundaryIso(formatLocalDate(hace7Dias), true)
+
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - i)
+        const fStr = formatLocalDate(d)
+        const rawLabel = d.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric' })
+        const label = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1)
+        buckets.push({
+          fecha: fStr,
+          label,
+          ingresos: 0,
+          reservas: 0,
+        })
+      }
+    } else if (periodo === '3meses') {
+      const hace89Dias = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 89)
+      fechaInicioStr = formatLocalDate(hace89Dias)
+      inicioIso = toLocalBoundaryIso(fechaInicioStr, false)
+
+      const hace179Dias = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 179)
+      const hace90Dias = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 90)
+      anteriorInicioIso = toLocalBoundaryIso(formatLocalDate(hace179Dias), false)
+      anteriorFinIso = toLocalBoundaryIso(formatLocalDate(hace90Dias), true)
+
+      // 13 intervalos semanales de 7 días
+      for (let w = 12; w >= 0; w--) {
+        const inicioSemana = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - (w * 7 + 6))
+        const fStr = formatLocalDate(inicioSemana)
+        const rawLabel = inicioSemana.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+        buckets.push({
+          fecha: fStr,
+          label: rawLabel,
+          ingresos: 0,
+          reservas: 0,
+        })
+      }
+    } else {
+      // '30dias' (predeterminado)
+      const hace29Dias = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 29)
+      fechaInicioStr = formatLocalDate(hace29Dias)
+      inicioIso = toLocalBoundaryIso(fechaInicioStr, false)
+
+      const hace59Dias = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 59)
+      const hace30Dias = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 30)
+      anteriorInicioIso = toLocalBoundaryIso(formatLocalDate(hace59Dias), false)
+      anteriorFinIso = toLocalBoundaryIso(formatLocalDate(hace30Dias), true)
+
+      for (let i = 29; i >= 0; i--) {
+        const d = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - i)
+        const fStr = formatLocalDate(d)
+        const label = d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })
+        buckets.push({
+          fecha: fStr,
+          label,
+          ingresos: 0,
+          reservas: 0,
+        })
+      }
+    }
+
+    // Consultas concurrentes a Supabase
+    const [
+      pagosPeriodoRes,
+      pagosAnteriorRes,
+      reservasPeriodoRes,
+      clasesPeriodoRes,
+      tiqueterasActivasRes,
+      planesRes,
+      perfilesClientesRes,
+    ] = await Promise.all([
+      // 1. Pagos aprobados en el período actual
+      supabase
+        .from('pagos')
+        .select('id, monto, fecha_pago, plan_id, tiquetera_id')
+        .eq('empresa_id', targetEmpresaId)
+        .eq('estado', 'aprobado')
+        .gte('fecha_pago', inicioIso)
+        .lte('fecha_pago', finIso),
+
+      // 2. Pagos aprobados en el período anterior (para cálculo de ingresosVariacion)
+      supabase
+        .from('pagos')
+        .select('monto')
+        .eq('empresa_id', targetEmpresaId)
+        .eq('estado', 'aprobado')
+        .gte('fecha_pago', anteriorInicioIso)
+        .lte('fecha_pago', anteriorFinIso),
+
+      // 3. Reservas en el período actual
+      supabase
+        .from('reservas')
+        .select(`
+          id,
+          clase_id,
+          bicicleta_id,
+          cliente_id,
+          cliente_nombre,
+          cliente_email,
+          fecha_reserva,
+          fecha_inicio,
+          fecha_fin,
+          estado,
+          total,
+          asistencia_confirmada
+        `)
+        .eq('empresa_id', targetEmpresaId)
+        .gte('fecha_reserva', fechaInicioStr)
+        .lte('fecha_reserva', fechaFinStr),
+
+      // 4. Clases en el período actual (para cálculo de ocupación)
+      supabase
+        .from('clases')
+        .select('id, capacidad, fecha, estado')
+        .eq('empresa_id', targetEmpresaId)
+        .gte('fecha', fechaInicioStr)
+        .lte('fecha', fechaFinStr)
+        .neq('estado', 'cancelada'),
+
+      // 5. Tiqueteras activas de la empresa
+      supabase
+        .from('tiqueteras')
+        .select('id, cliente_id, plan_id, creditos_disponibles, creditos_totales, fecha_vencimiento, estado')
+        .eq('empresa_id', targetEmpresaId)
+        .eq('estado', 'activa'),
+
+      // 6. Planes configurados del estudio
+      supabase
+        .from('planes')
+        .select('id, nombre, precio, creditos')
+        .eq('empresa_id', targetEmpresaId),
+
+      // 7. Perfiles de clientes del estudio
+      supabase
+        .from('perfiles')
+        .select('id')
+        .eq('empresa_id', targetEmpresaId)
+        .eq('rol', 'cliente')
+        .eq('activo', true),
+    ])
+
+    const pagosPeriodo = pagosPeriodoRes.data || []
+    const pagosAnterior = pagosAnteriorRes.data || []
+    const reservas = reservasPeriodoRes.data || []
+    const clasesPeriodo = clasesPeriodoRes.data || []
+    const tiqueterasActivas = tiqueterasActivasRes.data || []
+    const planes = planesRes.data || []
+    const perfilesClientes = perfilesClientesRes.data || []
+
+    // 1. Distribución en gráfica temporal (ingresos y reservas)
+    for (const pago of pagosPeriodo) {
+      const monto = Number(pago.monto || 0)
+      if (periodo === 'hoy') {
+        let horaStr = ''
+        if (pago.fecha_pago) {
+          const match = pago.fecha_pago.match(/T(\d{2}):/)
+          if (match) horaStr = `${match[1]}:00`
+        }
+        const b = buckets.find((item) => item.label === horaStr)
+        if (b) {
+          b.ingresos += monto
+        } else if (buckets.length > 0) {
+          buckets[0].ingresos += monto
+        }
+      } else if (periodo === '3meses') {
+        const pDate = new Date(pago.fecha_pago).getTime()
+        for (let i = buckets.length - 1; i >= 0; i--) {
+          const bDate = new Date(buckets[i].fecha).getTime()
+          if (pDate >= bDate) {
+            buckets[i].ingresos += monto
+            break
+          }
+        }
+      } else {
+        const f = pago.fecha_pago ? pago.fecha_pago.split('T')[0] : ''
+        const b = buckets.find((item) => item.fecha === f)
+        if (b) b.ingresos += monto
+      }
+    }
+
+    for (const res of reservas) {
+      if (periodo === 'hoy') {
+        let horaStr = ''
+        if (res.fecha_inicio) {
+          const match = res.fecha_inicio.match(/T(\d{2}):/)
+          if (match) horaStr = `${match[1]}:00`
+        }
+        const b = buckets.find((item) => item.label === horaStr)
+        if (b) {
+          b.reservas += 1
+        } else if (buckets.length > 0) {
+          buckets[0].reservas += 1
+        }
+      } else if (periodo === '3meses') {
+        const rawDate = res.fecha_reserva || (res.fecha_inicio ? res.fecha_inicio.split('T')[0] : '')
+        const rDate = new Date(rawDate).getTime()
+        for (let i = buckets.length - 1; i >= 0; i--) {
+          const bDate = new Date(buckets[i].fecha).getTime()
+          if (rDate >= bDate) {
+            buckets[i].reservas += 1
+            break
+          }
+        }
+      } else {
+        const f = res.fecha_reserva || (res.fecha_inicio ? res.fecha_inicio.split('T')[0] : '')
+        const b = buckets.find((item) => item.fecha === f)
+        if (b) b.reservas += 1
+      }
+    }
+
+    for (const b of buckets) {
+      b.ingresos = roundCurrency(b.ingresos)
+    }
+
+    // 2. Desglose de estados de reservas
+    const desgloseEstados: DesgloseEstadosReservas = {
+      confirmadas: 0,
+      asistidas: 0,
+      pendientes: 0,
+      canceladas: 0,
+    }
+
+    for (const r of reservas) {
+      if (r.asistencia_confirmada || (r.estado as string) === 'completada' || r.estado === 'finalizada') {
+        desgloseEstados.asistidas += 1
+      } else if (r.estado === 'confirmada' || r.estado === 'en_curso') {
+        desgloseEstados.confirmadas += 1
+      } else if (r.estado === 'pendiente') {
+        desgloseEstados.pendientes += 1
+      } else if (r.estado === 'cancelada') {
+        desgloseEstados.canceladas += 1
+      }
+    }
+
+    // 3. KPIs del Dashboard
+    const ingresosTotal = roundCurrency(pagosPeriodo.reduce((sum, p) => sum + Number(p.monto || 0), 0))
+    const ingresosAnterior = roundCurrency(pagosAnterior.reduce((sum, p) => sum + Number(p.monto || 0), 0))
+
+    let ingresosVariacion = 0
+    if (ingresosAnterior === 0) {
+      ingresosVariacion = ingresosTotal > 0 ? 100 : 0
+    } else {
+      ingresosVariacion = Math.round(((ingresosTotal - ingresosAnterior) / ingresosAnterior) * 1000) / 10
+    }
+
+    const reservasTotal = reservas.length
+
+    const totalProgramadas = reservas.filter((r) => r.estado !== 'cancelada').length
+    const tasaAsistencia = totalProgramadas > 0
+      ? Math.min(100, Math.round((desgloseEstados.asistidas / totalProgramadas) * 1000) / 10)
+      : 0
+
+    const capacidadTotal = clasesPeriodo.reduce((sum, c) => sum + (c.capacidad || 15), 0)
+    const cuposOcupados = reservas.filter((r) => r.estado !== 'cancelada').length
+    const ocupacionPromedio = capacidadTotal > 0
+      ? Math.min(100, Math.round((cuposOcupados / capacidadTotal) * 1000) / 10)
+      : 0
+
+    const clientesActivosSet = new Set<string>()
+    for (const r of reservas) {
+      if (r.cliente_id) clientesActivosSet.add(r.cliente_id)
+    }
+    for (const t of tiqueterasActivas) {
+      if (t.cliente_id) clientesActivosSet.add(t.cliente_id)
+    }
+    const clientesActivos = Math.max(clientesActivosSet.size, perfilesClientes.length)
+
+    const tiqueterasVigentes = tiqueterasActivas.length
+
+    const en7Dias = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    const planesPorVencer = tiqueterasActivas.filter((t) => {
+      const creditos = Number(t.creditos_disponibles || 0)
+      const vencePronto = t.fecha_vencimiento && t.fecha_vencimiento <= en7Dias
+      return creditos <= 2 || vencePronto
+    }).length
+
+    const kpis: KpisDashboardEjecutivo = {
+      ingresosTotal,
+      ingresosVariacion,
+      reservasTotal,
+      tasaAsistencia,
+      ocupacionPromedio,
+      clientesActivos,
+      tiqueterasVigentes,
+      planesPorVencer,
+    }
+
+    // 4. Franjas Horas Pico
+    const franjasHorariasBase = [
+      '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
+      '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
+      '18:00', '19:00', '20:00', '21:00',
+    ]
+    const conteoHoras = new Map<string, number>()
+    for (const h of franjasHorariasBase) {
+      conteoHoras.set(h, 0)
+    }
+
+    for (const r of reservas) {
+      let hora = ''
+      if (r.fecha_inicio) {
+        const match = r.fecha_inicio.match(/T(\d{2}):/)
+        if (match) hora = `${match[1]}:00`
+      }
+      if (hora && conteoHoras.has(hora)) {
+        conteoHoras.set(hora, (conteoHoras.get(hora) || 0) + 1)
+      } else if (hora) {
+        conteoHoras.set(hora, (conteoHoras.get(hora) || 0) + 1)
+      }
+    }
+
+    const maxReservasHora = Math.max(...Array.from(conteoHoras.values()), 0)
+    const horasPico: FranjaHoraPico[] = Array.from(conteoHoras.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([hora, cant]) => ({
+        hora,
+        reservas: cant,
+        esPico: maxReservasHora > 0 && cant >= Math.max(1, Math.round(maxReservasHora * 0.75)),
+      }))
+
+    // 5. Rendimiento de Planes
+    const planesMap = new Map<string, { id: string; nombre: string; precio: number; creditos: number }>()
+    for (const p of planes) {
+      planesMap.set(p.id, p)
+    }
+
+    const statsPlanes = new Map<string, { ventas: number; ingresos: number; nombre: string }>()
+    for (const p of planes) {
+      statsPlanes.set(p.id, {
+        ventas: 0,
+        ingresos: 0,
+        nombre: p.nombre,
+      })
+    }
+
+    const tiqueteraPlanMap = new Map<string, string>()
+    for (const t of tiqueterasActivas) {
+      if (t.plan_id) tiqueteraPlanMap.set(t.id, t.plan_id)
+    }
+
+    let totalIngresosPlanes = 0
+    for (const pago of pagosPeriodo) {
+      const planId = pago.plan_id || (pago.tiquetera_id ? tiqueteraPlanMap.get(pago.tiquetera_id) : null)
+      const monto = Number(pago.monto || 0)
+
+      if (planId && statsPlanes.has(planId)) {
+        const item = statsPlanes.get(planId)!
+        item.ventas += 1
+        item.ingresos += monto
+        totalIngresosPlanes += monto
+      } else if (planId) {
+        statsPlanes.set(planId, {
+          ventas: 1,
+          ingresos: monto,
+          nombre: planesMap.get(planId)?.nombre || 'Plan Especial',
+        })
+        totalIngresosPlanes += monto
+      }
+    }
+
+    const divisorPlanes = totalIngresosPlanes > 0 ? totalIngresosPlanes : ingresosTotal
+    const rendimientoPlanes: RendimientoPlanItem[] = Array.from(statsPlanes.entries())
+      .map(([planId, data]) => ({
+        planId,
+        nombre: data.nombre,
+        ventas: data.ventas,
+        ingresos: roundCurrency(data.ingresos),
+        porcentaje: divisorPlanes > 0
+          ? Math.round((data.ingresos / divisorPlanes) * 1000) / 10
+          : 0,
+      }))
+      .sort((a, b) => b.ingresos - a.ingresos || b.ventas - a.ventas)
+
+    // 6. Top Clientes (5 con más asistencias/reservas en el período)
+    const clientesStatsMap = new Map<string, { asistencias: number; total: number; nombre: string; email: string }>()
+
+    for (const r of reservas) {
+      const cid = r.cliente_id
+      if (!cid) continue
+      const prev = clientesStatsMap.get(cid) || {
+        asistencias: 0,
+        total: 0,
+        nombre: r.cliente_nombre || '',
+        email: r.cliente_email || '',
+      }
+      prev.total += 1
+      if (r.asistencia_confirmada || (r.estado as string) === 'completada' || r.estado === 'finalizada') {
+        prev.asistencias += 1
+      }
+      clientesStatsMap.set(cid, prev)
+    }
+
+    const topEntries = Array.from(clientesStatsMap.entries())
+      .sort((a, b) => b[1].asistencias - a[1].asistencias || b[1].total - a[1].total)
+      .slice(0, 5)
+
+    let topClientes: TopClienteItem[] = []
+
+    if (topEntries.length > 0) {
+      const topIds = topEntries.map(([id]) => id)
+
+      const [perfilesTopRes, gamifTopRes] = await Promise.all([
+        supabase
+          .from('perfiles')
+          .select('id, nombre_completo, email, avatar_url')
+          .in('id', topIds),
+        supabase
+          .from('metricas_gamificacion')
+          .select('usuario_id, puntos_acumulados')
+          .in('usuario_id', topIds),
+      ])
+
+      const perfilesMap = new Map((perfilesTopRes.data || []).map((p) => [p.id, p]))
+      const xpMap = new Map<string, number>()
+      for (const g of gamifTopRes.data || []) {
+        const prevXp = xpMap.get(g.usuario_id) || 0
+        xpMap.set(g.usuario_id, Math.max(prevXp, Number(g.puntos_acumulados || 0)))
+      }
+
+      topClientes = topEntries.map(([id, stats]) => {
+        const perf = perfilesMap.get(id)
+        return {
+          usuarioId: id,
+          nombre: perf?.nombre_completo || stats.nombre || 'Cliente',
+          email: perf?.email || stats.email || '',
+          avatarUrl: perf?.avatar_url || undefined,
+          asistencias: stats.asistencias,
+          xpTotal: xpMap.get(id) || 0,
+        }
+      })
+    }
+
+    return {
+      kpis,
+      graficaIngresosReservas: buckets,
+      horasPico,
+      rendimientoPlanes,
+      desgloseEstados,
+      topClientes,
+    }
+  } catch (err) {
+    console.warn('[adminService] Error al obtener métricas del dashboard ejecutivo:', err)
+    return defaultRespuesta
+  }
+}
+
+/**
  * Servicio Backend para el Panel Administrativo (Métricas, Control de Clases, Caja y Clientes)
  */
 export const adminService = {
+  /**
+   * Obtiene las métricas consolidadas del Dashboard Administrativo Ejecutivo.
+   */
+  obtenerMetricasDashboardEjecutivo,
+
   /**
    * Obtiene series temporales (diarias o mensuales) de ingresos para gráficos administrativos,
    * separando "Ingresos cobrados" (pagos aprobados / ingresos en caja) y
@@ -864,8 +1453,8 @@ export const adminService = {
       }
 
       const capacidadObjetivo = claseCreada.capacidad || data.capacidad || 15
-      const bicisRes = await clasesService.ensureBicicletasForEmpresa(data.empresaId, capacidadObjetivo)
-      if (bicisRes.error) {
+      const bicisRes = await bicicletasService.sincronizarCapacidadSala(data.empresaId, capacidadObjetivo)
+      if (!bicisRes.success && bicisRes.error) {
         console.warn('No se pudieron sincronizar las bicicletas al crear la clase:', bicisRes.error)
       }
 

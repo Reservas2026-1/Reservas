@@ -19,6 +19,7 @@ import {
   Eye,
   Flame,
   LayoutGrid,
+  Trash2,
 } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -37,9 +38,12 @@ export const BrandSettingsView: React.FC = () => {
     setCustomPrimaryColor,
     logoUrl,
     setLogoUrl,
+    portadaUrl,
+    setPortadaUrl,
     empresaId,
     estudioActivo,
     setEstudioActivo,
+    actualizarEstudio,
   } = useBranding()
 
   // Estados locales para el formulario de configuración
@@ -55,12 +59,17 @@ export const BrandSettingsView: React.FC = () => {
   const [currentLogoUrl, setCurrentLogoUrl] = useState<string | null>(
     logoUrl || estudioActivo?.logo_url || null
   )
+  const [currentPortadaUrl, setCurrentPortadaUrl] = useState<string | null>(
+    portadaUrl || estudioActivo?.portada_url || null
+  )
 
   // Estados de subida y guardado
   const [uploadingLogo, setUploadingLogo] = useState<boolean>(false)
+  const [uploadingPortada, setUploadingPortada] = useState<boolean>(false)
   const [savingSettings, setSavingSettings] = useState<boolean>(false)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const portadaFileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Sincronizar si cambia el estudioActivo externamente
   useEffect(() => {
@@ -76,6 +85,7 @@ export const BrandSettingsView: React.FC = () => {
       if (estudioActivo.email) setEmail(estudioActivo.email)
       if (estudioActivo.direccion) setDireccion(estudioActivo.direccion)
       if (estudioActivo.logo_url) setCurrentLogoUrl(estudioActivo.logo_url)
+      if (estudioActivo.portada_url) setCurrentPortadaUrl(estudioActivo.portada_url)
     }
   }, [estudioActivo, studioName])
 
@@ -128,6 +138,60 @@ export const BrandSettingsView: React.FC = () => {
     }
   }
 
+  // Subida de imagen de portada / banner hacia Supabase Storage
+  const handlePortadaFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingPortada(true)
+    setFeedback(null)
+
+    try {
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
+      if (!allowedTypes.includes(file.type)) {
+        throw new Error('Solo se permiten imágenes en formato PNG, JPG o WEBP.')
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        throw new Error('La imagen de portada no debe superar los 5MB.')
+      }
+
+      const activeId = estudioActivo?.id || empresaId
+      const publicUrl = await empresasService.subirPortadaEmpresa(activeId, file)
+
+      setCurrentPortadaUrl(publicUrl)
+      setPortadaUrl(publicUrl)
+      if (actualizarEstudio) {
+        await actualizarEstudio({ portada_url: publicUrl })
+      }
+
+      setFeedback({
+        type: 'success',
+        message: '¡Imagen de portada / banner actualizada exitosamente!',
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error inesperado al subir la imagen de portada'
+      setFeedback({ type: 'error', message })
+    } finally {
+      setUploadingPortada(false)
+      if (portadaFileInputRef.current) {
+        portadaFileInputRef.current.value = ''
+      }
+    }
+  }
+
+  // Eliminar imagen de portada
+  const handleEliminarPortada = async () => {
+    setCurrentPortadaUrl(null)
+    setPortadaUrl(null)
+    if (actualizarEstudio) {
+      await actualizarEstudio({ portada_url: null })
+    }
+    setFeedback({
+      type: 'success',
+      message: 'Imagen de portada eliminada. Se usará la portada por defecto del rubro.',
+    })
+  }
+
   // Guardar configuración completa en base de datos
   const handleGuardarConfiguracion = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -143,6 +207,7 @@ export const BrandSettingsView: React.FC = () => {
         telefono: telefono.trim(),
         email: email.trim(),
         logo_url: currentLogoUrl || undefined,
+        portada_url: currentPortadaUrl || null,
       }
 
       const res = await empresasService.actualizarConfiguracionEstudio(empresaId, updateData)
@@ -153,6 +218,13 @@ export const BrandSettingsView: React.FC = () => {
         setCustomPrimaryColor(colorPrimario)
         if (currentLogoUrl) {
           setLogoUrl(currentLogoUrl)
+        } else {
+          setLogoUrl(null)
+        }
+        if (currentPortadaUrl) {
+          setPortadaUrl(currentPortadaUrl)
+        } else {
+          setPortadaUrl(null)
         }
         setEstudioActivo({
           ...estudioActivo,
@@ -164,7 +236,20 @@ export const BrandSettingsView: React.FC = () => {
           telefono: telefono.trim(),
           email: email.trim(),
           logo_url: currentLogoUrl,
+          portada_url: currentPortadaUrl,
         })
+        if (actualizarEstudio) {
+          await actualizarEstudio({
+            nombre: nombre.trim(),
+            color_primario: colorPrimario,
+            capacidad_sala: capacidadSala,
+            direccion: direccion.trim(),
+            telefono: telefono.trim(),
+            email: email.trim(),
+            logo_url: currentLogoUrl,
+            portada_url: currentPortadaUrl,
+          })
+        }
 
         setFeedback({
           type: 'success',
@@ -175,6 +260,15 @@ export const BrandSettingsView: React.FC = () => {
         setStudioName(nombre.trim())
         setCustomPrimaryColor(colorPrimario)
         if (currentLogoUrl) setLogoUrl(currentLogoUrl)
+        if (currentPortadaUrl) setPortadaUrl(currentPortadaUrl)
+        if (actualizarEstudio) {
+          await actualizarEstudio({
+            nombre: nombre.trim(),
+            color_primario: colorPrimario,
+            logo_url: currentLogoUrl,
+            portada_url: currentPortadaUrl,
+          })
+        }
 
         setFeedback({
           type: 'success',
@@ -367,8 +461,98 @@ export const BrandSettingsView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 3. Selector de Color Primario en Vivo */}
-                <div className="space-y-3 pt-2 border-t">
+                {/* 3. Imagen de Fondo / Portada del Estudio (Banner) */}
+                <div className="space-y-3 pt-4 border-t">
+                  <label className="font-semibold text-foreground flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span>Imagen de Fondo / Portada del Estudio (Banner)</span>
+                    </span>
+                    <span className="text-[11px] text-muted-foreground font-normal">
+                      PNG, JPG, WEBP (Max 5MB)
+                    </span>
+                  </label>
+
+                  <div className="flex flex-col sm:flex-row items-center gap-4 p-4 rounded-xl border border-dashed bg-muted/20">
+                    {/* Vista previa de la portada rectangular */}
+                    <div className="w-full sm:w-44 h-24 rounded-xl border bg-card relative overflow-hidden shadow-sm shrink-0 flex items-center justify-center">
+                      {currentPortadaUrl ? (
+                        <img
+                          src={currentPortadaUrl}
+                          alt="Vista previa de la portada"
+                          className="w-full h-full object-cover"
+                          onError={() => setCurrentPortadaUrl(null)}
+                        />
+                      ) : (
+                        <div className="text-center text-muted-foreground p-2">
+                          <ImageIcon className="w-6 h-6 mx-auto opacity-30" />
+                          <span className="text-[9px] block mt-1">Sin portada personalizada</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-2 flex-1 w-full">
+                      <input
+                        ref={portadaFileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        className="hidden"
+                        onChange={handlePortadaFileChange}
+                      />
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={uploadingPortada}
+                          onClick={() => portadaFileInputRef.current?.click()}
+                          className="text-xs gap-1.5 font-semibold"
+                        >
+                          {uploadingPortada ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>Subiendo portada...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>Subir Portada / Banner</span>
+                            </>
+                          )}
+                        </Button>
+
+                        {currentPortadaUrl && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleEliminarPortada}
+                            className="text-xs text-destructive hover:bg-destructive/10 gap-1.5"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Eliminar</span>
+                          </Button>
+                        )}
+                      </div>
+
+                      {/* Entrada opcional de URL directa de portada */}
+                      <Input
+                        value={currentPortadaUrl || ''}
+                        onChange={(e) => {
+                          const url = e.target.value.trim()
+                          setCurrentPortadaUrl(url || null)
+                          setPortadaUrl(url || null)
+                        }}
+                        placeholder="O ingresa una URL pública directa del banner..."
+                        className="text-[11px] font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Selector de Color Primario en Vivo */}
+                <div className="space-y-3 pt-4 border-t">
                   <div className="flex items-center justify-between">
                     <label className="font-semibold text-foreground flex items-center gap-1.5">
                       <Palette className="w-3.5 h-3.5 text-muted-foreground" />
@@ -438,32 +622,7 @@ export const BrandSettingsView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 4. Capacidad de Sala de Indoor Cycling */}
-                <div className="space-y-1.5 pt-2 border-t">
-                  <div className="flex items-center justify-between">
-                    <label className="font-semibold text-foreground flex items-center gap-1.5">
-                      {verticalConfig.showBicycleMap ? <Bike className="w-3.5 h-3.5 text-muted-foreground" /> : <LayoutGrid className="w-3.5 h-3.5 text-muted-foreground" />}
-                      <span>Capacidad de {verticalConfig.espacio} ({verticalConfig.recursoPlural})</span>
-                    </label>
-                    <Badge variant="secondary" className="font-mono text-xs">
-                      {capacidadSala} {verticalConfig.recursoPlural}
-                    </Badge>
-                  </div>
-                  <Input
-                    type="number"
-                    min={5}
-                    max={30}
-                    value={capacidadSala}
-                    onChange={(e) => setCapacidadSala(parseInt(e.target.value, 10) || 15)}
-                    className="text-xs font-medium"
-                  />
-                  <span className="text-[10px] text-muted-foreground block">
-                    Define la cantidad máxima de {verticalConfig.recursoCortoPlural} disponibles por{' '}
-                    {verticalConfig.sesionSingular.toLowerCase()} en tu {verticalConfig.espacio.toLowerCase()}.
-                  </span>
-                </div>
-
-                {/* 5. Datos de Contacto y Ubicación */}
+                {/* 4. Datos de Contacto y Ubicación */}
                 <div className="space-y-3 pt-2 border-t">
                   <label className="font-semibold text-foreground">Información de Ubicación y Contacto</label>
 
@@ -564,96 +723,110 @@ export const BrandSettingsView: React.FC = () => {
             </div>
 
             {/* Pantalla Interna del Celular */}
-            <div className="relative h-[560px] rounded-[32px] bg-slate-900 text-white overflow-hidden flex flex-col justify-between pt-6 pb-4 px-4 select-none">
-              {/* Barra de Estado del Móvil */}
-              <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 px-2 pt-1 mb-3">
-                <span>9:41</span>
-                <div className="flex items-center gap-1.5">
-                  <span>5G</span>
-                  <div className="w-4 h-2 border border-slate-400 rounded-xs flex items-center p-0.5">
-                    <div className="w-full h-full bg-emerald-500 rounded-2xs" />
+            <div className="relative h-[560px] rounded-[32px] bg-slate-950 text-white overflow-hidden flex flex-col justify-between select-none">
+              
+              {/* Sección Superior: Banner de Portada + Barra de Estado + Logo Superpuesto */}
+              <div className="relative">
+                {/* Banner de Portada Superior */}
+                <div className="relative h-28 sm:h-32 w-full bg-slate-900 overflow-hidden">
+                  <img
+                    src={currentPortadaUrl || '/Sppining.png'}
+                    alt="Portada del estudio en móvil"
+                    className="w-full h-full object-cover opacity-90"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-black/60" />
+
+                  {/* Barra de Estado del Móvil (superpuesta en el banner) */}
+                  <div className="relative z-20 flex items-center justify-between text-[10px] font-mono text-white/90 px-4 pt-2">
+                    <span>9:41</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>5G</span>
+                      <div className="w-4 h-2 border border-white/70 rounded-xs flex items-center p-0.5">
+                        <div className="w-full h-full bg-emerald-400 rounded-2xs" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Badge de Rubro sobre la portada */}
+                  <div className="absolute top-7 right-3 z-20">
+                    <span
+                      className="text-[9px] font-bold px-2 py-0.5 rounded-full text-white shadow-xs uppercase tracking-wider backdrop-blur-xs border border-white/20"
+                      style={{ backgroundColor: colorPrimario }}
+                    >
+                      {verticalConfig.etiquetaNegocio}
+                    </span>
                   </div>
                 </div>
-              </div>
 
-              {/* Cabecera Móvil con Logo y Nombre */}
-              <div className="text-center space-y-3 pt-2">
-                <div className="w-16 h-16 mx-auto rounded-2xl bg-white/10 backdrop-blur-md p-2 flex items-center justify-center border border-white/20 shadow-md">
-                  {currentLogoUrl ? (
-                    <img
-                      src={currentLogoUrl}
-                      alt="Logo móvil"
-                      className="max-h-full max-w-full object-contain"
-                    />
-                  ) : (
-                    verticalConfig.showBicycleMap ? <Bike className="w-8 h-8 text-white" /> : <LayoutGrid className="w-8 h-8 text-white" />
-                  )}
-                </div>
-
-                <div>
-                  <h3 className="text-lg font-black tracking-tight leading-tight px-2 text-white">
-                    {nombre || `Mi ${verticalConfig.espacio}`}
-                  </h3>
-                  <div className="inline-flex items-center gap-1 text-[10px] text-slate-300 mt-1">
-                    <MapPin className="w-2.5 h-2.5" />
-                    <span className="truncate max-w-[200px]">{direccion || 'Bogotá, Colombia'}</span>
+                {/* Superposición de Logo y Datos del Estudio */}
+                <div className="relative px-3 -mt-7 z-20 flex items-end gap-2.5">
+                  {/* Logotipo del Estudio */}
+                  <div className="w-14 h-14 rounded-2xl bg-white dark:bg-slate-900 p-1 flex items-center justify-center border-2 border-white dark:border-slate-800 shadow-lg shrink-0 overflow-hidden">
+                    {currentLogoUrl ? (
+                      <img
+                        src={currentLogoUrl}
+                        alt="Logo móvil"
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    ) : (
+                      <div
+                        className="w-full h-full rounded-xl flex items-center justify-center font-black text-white text-base shadow-inner"
+                        style={{ backgroundColor: colorPrimario }}
+                      >
+                        {nombre ? nombre.slice(0, 2).toUpperCase() : 'ES'}
+                      </div>
+                    )}
                   </div>
-                </div>
 
-                {/* Badge con color primario */}
-                <div className="flex justify-center">
-                  <span
-                    className="text-[10px] font-bold px-2.5 py-0.5 rounded-full text-white shadow-xs uppercase tracking-wider"
-                    style={{ backgroundColor: colorPrimario }}
-                  >
-                    {verticalConfig.espacio} de {capacidadSala} {verticalConfig.recursoPlural}
-                  </span>
+                  {/* Nombre y Dirección */}
+                  <div className="flex-1 min-w-0 pb-1">
+                    <h3 className="text-sm font-black text-white truncate leading-tight drop-shadow-sm">
+                      {nombre || `Mi ${verticalConfig.espacio}`}
+                    </h3>
+                    <div className="inline-flex items-center gap-1 text-[10px] text-slate-300 mt-0.5 truncate max-w-full">
+                      <MapPin className="w-2.5 h-2.5 shrink-0 text-slate-400" />
+                      <span className="truncate">{direccion || 'Bogotá, Colombia'}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
               {/* Tarjeta de Próxima Clase en el Móvil */}
-              <div className="my-auto space-y-2.5">
-                <div className="p-3 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm space-y-2">
+              <div className="px-3 my-auto space-y-2.5">
+                <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm space-y-2.5">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-bold text-white flex items-center gap-1">
+                    <span className="font-bold text-white flex items-center gap-1.5">
                       <Flame className="w-3.5 h-3.5" style={{ color: colorPrimario }} />
-                      {verticalConfig.ejemploSesion}
+                      <span>{verticalConfig.ejemploSesion}</span>
                     </span>
-                    <span className="font-mono text-[10px] text-slate-400">18:30 hrs</span>
+                    <span className="font-mono text-[10px] text-slate-300 bg-white/10 px-2 py-0.5 rounded-full">
+                      18:30 hrs
+                    </span>
                   </div>
 
                   <p className="text-[10px] text-slate-300">
-                    Coach Camila Rossi • 45 min intervalo
+                    Coach Principal • 45 min intervalo de alta intensidad
                   </p>
 
-                  {/* Mini Mapa de Puestos 3x5 dentro del Celular */}
-                  <div className="pt-2 border-t border-white/10">
-                    <div className="text-[9px] text-slate-400 mb-1 flex justify-between">
-                      <span>Puestos en Sala:</span>
-                      <span className="font-bold text-emerald-400">Libres 11 / 15</span>
+                  <div className="pt-2 border-t border-white/10 space-y-2">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-slate-400">Disponibilidad en vivo</span>
+                      <span className="font-bold text-emerald-400 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Cupos Disponibles
+                      </span>
                     </div>
 
-                    <div className="grid grid-cols-5 gap-1.5 p-1.5 rounded-lg bg-black/40">
-                      {Array.from({ length: 15 }).map((_, idx) => {
-                        const num = idx + 1
-                        const ocupada = num === 3 || num === 7 || num === 10 || num === 14
-                        const esSeleccionada = num === 4
-                        return (
-                          <div
-                            key={num}
-                            className={`h-5 rounded-md text-[8px] font-bold flex items-center justify-center transition-all ${
-                              esSeleccionada
-                                ? 'text-white font-black shadow-xs'
-                                : ocupada
-                                ? 'bg-white/10 text-white/40'
-                                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                            }`}
-                            style={esSeleccionada ? { backgroundColor: colorPrimario } : undefined}
-                          >
-                            #{num}
-                          </div>
-                        )
-                      })}
+                    <div className="w-full bg-black/40 rounded-full h-2 overflow-hidden p-0.5">
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{ width: '75%', backgroundColor: colorPrimario }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[9px] text-slate-400">
+                      <span>{verticalConfig.espacio} Climatizada</span>
+                      <span>Audio & Iluminación Pro</span>
                     </div>
                   </div>
                 </div>
@@ -665,28 +838,30 @@ export const BrandSettingsView: React.FC = () => {
                   style={{ backgroundColor: colorPrimario }}
                 >
                   {verticalConfig.showBicycleMap ? <Bike className="w-3.5 h-3.5" /> : <LayoutGrid className="w-3.5 h-3.5" />}
-                  <span>Reservar {verticalConfig.recursoSingular} #4 Ahora</span>
+                  <span>Reservar {verticalConfig.sesionSingular} Ahora</span>
                 </button>
               </div>
 
               {/* Barra inferior de navegación del móvil */}
-              <div className="pt-2 border-t border-white/10 flex items-center justify-around text-slate-400 text-[10px]">
-                <div className="flex flex-col items-center gap-0.5" style={{ color: colorPrimario }}>
-                  {verticalConfig.showBicycleMap ? <Bike className="w-3.5 h-3.5" /> : <LayoutGrid className="w-3.5 h-3.5" />}
-                  <span className="text-[9px] font-bold">{verticalConfig.recursoPlural}</span>
+              <div className="px-3 pb-3">
+                <div className="pt-2 border-t border-white/10 flex items-center justify-around text-slate-400 text-[10px]">
+                  <div className="flex flex-col items-center gap-0.5" style={{ color: colorPrimario }}>
+                    {verticalConfig.showBicycleMap ? <Bike className="w-3.5 h-3.5" /> : <LayoutGrid className="w-3.5 h-3.5" />}
+                    <span className="text-[9px] font-bold">{verticalConfig.recursoPlural}</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-0.5 text-slate-500">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span className="text-[9px]">Planes</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-0.5 text-slate-500">
+                    <Smartphone className="w-3.5 h-3.5" />
+                    <span className="text-[9px]">Pase QR</span>
+                  </div>
                 </div>
-                <div className="flex flex-col items-center gap-0.5 text-slate-500">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span className="text-[9px]">Planes</span>
-                </div>
-                <div className="flex flex-col items-center gap-0.5 text-slate-500">
-                  <Smartphone className="w-3.5 h-3.5" />
-                  <span className="text-[9px]">Pase QR</span>
-                </div>
-              </div>
 
-              {/* Home indicator bar del iPhone */}
-              <div className="w-24 h-1 bg-white/30 rounded-full mx-auto mt-2" />
+                {/* Home indicator bar del iPhone */}
+                <div className="w-24 h-1 bg-white/30 rounded-full mx-auto mt-2" />
+              </div>
             </div>
           </div>
         </div>

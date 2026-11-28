@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   LayoutDashboard,
   CalendarDays,
@@ -7,6 +7,8 @@ import {
   QrCode,
   CheckCircle2,
   ArrowRight,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -100,27 +102,90 @@ const SYSTEM_TABS: SystemTabItem[] = [
 ]
 
 /**
- * Visor interactivo con 5 pestañas para explorar los módulos clave de Reserly.
+ * Visor interactivo de módulos con avance horizontal automático cada 10s,
+ * deslizamiento táctil y controles minimalistas en pantallas móviles.
  */
 export const ReserlyModulesViewer: React.FC<ReserlyModulesViewerProps> = ({
   onTryModule,
 }) => {
-  const [activeTabId, setActiveTabId] = useState<SystemTabItem['id']>('admin')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const touchStartXRef = useRef<number | null>(null)
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
 
-  const activeTab =
-    SYSTEM_TABS.find((tab) => tab.id === activeTabId) || SYSTEM_TABS[0]
+  const activeTab = SYSTEM_TABS[activeIndex] || SYSTEM_TABS[0]
+
+  // Función para reiniciar el temporizador de 10 segundos
+  const resetAutoAdvanceTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+    }
+    timerRef.current = setInterval(() => {
+      setActiveIndex((prev) => (prev + 1) % SYSTEM_TABS.length)
+    }, 10000)
+  }, [])
+
+  // Iniciar auto-avance cada 10 segundos al montar
+  useEffect(() => {
+    resetAutoAdvanceTimer()
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+      }
+    }
+  }, [resetAutoAdvanceTimer])
+
+  const handleSelectTab = (index: number) => {
+    setActiveIndex(index)
+    resetAutoAdvanceTimer()
+  }
+
+  const handleNext = () => {
+    setActiveIndex((prev) => (prev + 1) % SYSTEM_TABS.length)
+    resetAutoAdvanceTimer()
+  }
+
+  const handlePrev = () => {
+    setActiveIndex((prev) => (prev - 1 + SYSTEM_TABS.length) % SYSTEM_TABS.length)
+    resetAutoAdvanceTimer()
+  }
+
+  // Soporte para deslizamiento manual con touch/swipe
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartXRef.current = e.touches[0].clientX
+  }
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null) return
+    const touchEndX = e.changedTouches[0].clientX
+    const diff = touchStartXRef.current - touchEndX
+
+    if (diff > 45) {
+      // Deslizó hacia la izquierda -> siguiente
+      handleNext()
+    } else if (diff < -45) {
+      // Deslizó hacia la derecha -> anterior
+      handlePrev()
+    }
+    touchStartXRef.current = null
+  }
 
   return (
-    <div className="mb-16 sm:mb-20">
-      {/* Barra superior centrada con 5 pestañas interactivas */}
+    <div className="mb-14 sm:mb-20">
+      {/* =========================================================================
+          CONTROLES DE PESTAÑAS:
+          - En escritorio (>= md): Botones amplios con icono, título y descripción.
+          - En móvil (< md): Barra minimalista con puntos indicadores interactivos.
+      ========================================================================= */}
+
+      {/* Pestañas para Escritorio (ocultas en móvil) */}
       <div
         role="tablist"
         aria-label="Módulos del sistema Reserly"
-        className="max-w-5xl mx-auto mb-8 flex flex-wrap justify-center gap-2.5 sm:gap-3"
+        className="hidden md:flex max-w-5xl mx-auto mb-8 flex-wrap justify-center gap-2.5 sm:gap-3"
       >
-        {SYSTEM_TABS.map((tab) => {
+        {SYSTEM_TABS.map((tab, idx) => {
           const Icon = tab.icon
-          const isActive = tab.id === activeTab.id
+          const isActive = idx === activeIndex
 
           return (
             <button
@@ -130,15 +195,15 @@ export const ReserlyModulesViewer: React.FC<ReserlyModulesViewerProps> = ({
               type="button"
               aria-selected={isActive}
               aria-controls={`module-panel-${tab.id}`}
-              onClick={() => setActiveTabId(tab.id)}
-              className={`w-[calc(50%-6px)] sm:w-[calc(33.333%-8px)] lg:w-[calc(20%-10px)] flex items-start gap-2.5 p-3 sm:p-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer ${
+              onClick={() => handleSelectTab(idx)}
+              className={`w-[calc(20%-10px)] flex items-start gap-2.5 p-3 rounded-2xl border text-left transition-all duration-200 cursor-pointer ${
                 isActive
-                  ? 'bg-white dark:bg-slate-900 border-red-600 ring-2 ring-red-600/20 shadow-lg'
+                  ? 'bg-white dark:bg-slate-900 border-red-600 ring-2 ring-red-600/20 shadow-lg scale-[1.02]'
                   : 'bg-slate-50/90 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800 hover:border-red-300 dark:hover:border-red-800/70 hover:bg-white dark:hover:bg-slate-900'
               }`}
             >
               <div
-                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
                   isActive
                     ? 'bg-red-600 text-white shadow-sm shadow-red-600/30'
                     : 'bg-red-100/80 dark:bg-red-950/60 text-red-600 dark:text-red-400'
@@ -148,7 +213,7 @@ export const ReserlyModulesViewer: React.FC<ReserlyModulesViewerProps> = ({
               </div>
               <div className="min-w-0">
                 <p
-                  className={`text-xs sm:text-sm font-bold leading-tight truncate ${
+                  className={`text-xs font-bold leading-tight truncate ${
                     isActive
                       ? 'text-slate-900 dark:text-white'
                       : 'text-slate-700 dark:text-slate-200'
@@ -156,7 +221,7 @@ export const ReserlyModulesViewer: React.FC<ReserlyModulesViewerProps> = ({
                 >
                   {tab.title}
                 </p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug mt-0.5 line-clamp-2">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug mt-0.5 line-clamp-1">
                   {tab.description}
                 </p>
               </div>
@@ -165,47 +230,97 @@ export const ReserlyModulesViewer: React.FC<ReserlyModulesViewerProps> = ({
         })}
       </div>
 
-      {/* Ventana moderna de aplicación con la vista ampliada del módulo */}
+      {/* Puntos Indicadores Minimalistas para Móvil (< md) */}
+      <div className="flex md:hidden items-center justify-between max-w-sm mx-auto mb-4 px-2">
+        <button
+          type="button"
+          onClick={handlePrev}
+          aria-label="Módulo anterior"
+          className="p-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 transition-colors cursor-pointer"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+
+        <div className="flex items-center gap-2">
+          {SYSTEM_TABS.map((tab, idx) => {
+            const isActive = idx === activeIndex
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleSelectTab(idx)}
+                aria-label={`Ir al módulo ${tab.title}`}
+                className={`transition-all duration-300 cursor-pointer ${
+                  isActive
+                    ? 'w-7 h-2 bg-red-600 rounded-full shadow-xs'
+                    : 'w-2 h-2 bg-slate-300 dark:bg-slate-700 rounded-full hover:bg-slate-400'
+                }`}
+              />
+            )
+          })}
+        </div>
+
+        <button
+          type="button"
+          onClick={handleNext}
+          aria-label="Módulo siguiente"
+          className="p-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 transition-colors cursor-pointer"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* =========================================================================
+          PANEL DE VISTA PREVIA (DESLIZABLE TÁCTILMENTE)
+      ========================================================================= */}
       <div
         id={`module-panel-${activeTab.id}`}
         role="tabpanel"
         aria-labelledby={`module-tab-${activeTab.id}`}
-        className="max-w-5xl mx-auto rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl bg-slate-50 dark:bg-slate-900 p-4 sm:p-8 transition-colors"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        className="max-w-5xl mx-auto rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl bg-white dark:bg-slate-900 p-4 sm:p-7 transition-all duration-300"
       >
-        {/* Cabecera estilo ventana de navegador / aplicación */}
-        <div className="flex items-center justify-between gap-4 pb-4 mb-4 sm:mb-6 border-b border-slate-200/80 dark:border-slate-800">
+        {/* Cabecera estilo ventana de aplicación */}
+        <div className="flex items-center justify-between gap-3 pb-3 mb-3 sm:mb-5 border-b border-slate-200/80 dark:border-slate-800">
           <div className="flex items-center gap-1.5 sm:gap-2" aria-hidden="true">
             <span className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-red-500/90" />
             <span className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-amber-400/90" />
             <span className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-emerald-500/90" />
           </div>
 
-          <div className="hidden sm:flex items-center gap-2 px-3.5 py-1 rounded-full bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] font-mono text-slate-500 dark:text-slate-400">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-0.5 rounded-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] font-mono text-slate-500 dark:text-slate-400">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
             <span>{activeTab.windowUrl}</span>
           </div>
 
-          <Badge
-            variant="outline"
-            className="rounded-full px-3 py-0.5 text-[11px] font-bold border-red-200 dark:border-red-900/70 bg-red-50 dark:bg-red-950/60 text-red-600 dark:text-red-400"
-          >
-            {activeTab.title}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hidden sm:inline">
+              {activeIndex + 1} de {SYSTEM_TABS.length}
+            </span>
+            <Badge
+              variant="outline"
+              className="rounded-full px-2.5 py-0.5 text-[11px] font-bold border-red-200 dark:border-red-900/70 bg-red-50 dark:bg-red-950/60 text-red-600 dark:text-red-400"
+            >
+              {activeTab.title}
+            </Badge>
+          </div>
         </div>
 
-        {/* Imagen grande del módulo activo */}
-        <div className="rounded-2xl bg-white dark:bg-slate-950/60 border border-slate-200/70 dark:border-slate-800/80 p-2 sm:p-4 overflow-hidden">
+        {/* Imagen del módulo con fondo blanco sólido y bordes definidos */}
+        <div className="rounded-xl sm:rounded-2xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200/80 dark:border-slate-800 p-2 sm:p-3 overflow-hidden">
           <img
             key={activeTab.id}
             src={activeTab.image}
             alt={activeTab.imageAlt}
-            className="w-full max-h-[520px] object-contain mx-auto rounded-xl transition-all duration-300"
+            className="w-full max-h-[460px] sm:max-h-[520px] object-contain mx-auto rounded-lg transition-all duration-500 select-none"
+            loading="lazy"
           />
         </div>
 
-        {/* Barra inferior con 3 beneficios clave y botón de acción */}
-        <div className="mt-6 pt-6 border-t border-slate-200/80 dark:border-slate-800 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
-          <ul className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 flex-1 w-full">
+        {/* Barra inferior con beneficios y botón de acción */}
+        <div className="mt-5 pt-5 border-t border-slate-200/80 dark:border-slate-800 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+          <ul className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 flex-1 w-full">
             {activeTab.bullets.map((bullet, idx) => (
               <li
                 key={idx}
@@ -220,10 +335,10 @@ export const ReserlyModulesViewer: React.FC<ReserlyModulesViewerProps> = ({
           <Button
             type="button"
             onClick={onTryModule}
-            className="w-full lg:w-auto shrink-0 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm px-6 py-3 h-auto shadow-md shadow-red-600/25 transition-all"
+            className="w-full lg:w-auto shrink-0 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs sm:text-sm px-5 py-2.5 h-auto shadow-md shadow-red-600/25 transition-all cursor-pointer"
           >
             <span>Probar este módulo gratis</span>
-            <ArrowRight className="w-4 h-4" />
+            <ArrowRight className="w-4 h-4 ml-1.5" />
           </Button>
         </div>
       </div>

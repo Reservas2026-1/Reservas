@@ -5,13 +5,10 @@ import {
   MapPin,
   Phone,
   Mail,
-  Bike,
   CheckCircle2,
   Sparkles,
   ArrowRight,
-  PlusCircle,
   Loader2,
-  Palette,
   Check,
   Clock,
   Tag,
@@ -21,7 +18,6 @@ import {
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -74,6 +70,15 @@ function getCategoryCoverImage(tipoNegocio?: string | null): string {
   return '/Sppining.png'
 }
 
+function getStudioInitials(nombre: string): string {
+  if (!nombre) return 'ES'
+  const words = nombre.trim().split(/\s+/).filter(Boolean)
+  if (words.length === 1) {
+    return words[0].slice(0, 2).toUpperCase()
+  }
+  return (words[0][0] + words[1][0]).toUpperCase()
+}
+
 function formatLocalIsoDate(date: Date): string {
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')
@@ -111,7 +116,13 @@ export const EstudiosDirectoryView: React.FC<EstudiosDirectoryViewProps> = ({
   onVolver,
   allowCreateStudio = true,
 }) => {
-  const { currentPalette, empresaId, setEstudioActivo } = useBranding()
+  const { currentPalette, empresaId, setEstudioActivo, isSingleTenant } = useBranding()
+
+  useEffect(() => {
+    if (isSingleTenant && onVolver) {
+      onVolver()
+    }
+  }, [isSingleTenant, onVolver])
 
   const [estudios, setEstudios] = useState<EstudioDirectorioItem[]>([])
   const [loading, setLoading] = useState<boolean>(true)
@@ -120,6 +131,7 @@ export const EstudiosDirectoryView: React.FC<EstudiosDirectoryViewProps> = ({
   const [categoriaFiltro, setCategoriaFiltro] = useState<string>('todas')
   const [notificacionUrl, setNotificacionUrl] = useState<string | null>(null)
   const [brokenLogos, setBrokenLogos] = useState<Record<string, boolean>>({})
+  const [brokenPortadas, setBrokenPortadas] = useState<Record<string, boolean>>({})
 
   // Modal para registrar nuevo estudio SaaS
   const [showRegistroModal, setShowRegistroModal] = useState<boolean>(false)
@@ -370,6 +382,10 @@ export const EstudiosDirectoryView: React.FC<EstudiosDirectoryViewProps> = ({
 
   const hayFiltrosActivos = Boolean(busqueda.trim()) || categoriaFiltro !== 'todas'
 
+  if (isSingleTenant) {
+    return null
+  }
+
   return (
     <div className="space-y-6 pb-12 max-w-7xl mx-auto">
       {/* Banner de Bienvenida y Header SaaS */}
@@ -390,19 +406,15 @@ export const EstudiosDirectoryView: React.FC<EstudiosDirectoryViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {allowCreateStudio && (
+            {onVolver && (
               <Button
                 type="button"
-                onClick={() => setShowRegistroModal(true)}
-                className={`gap-2 font-bold shadow-md ${currentPalette.bgClass} text-white hover:opacity-90`}
+                variant="outline"
+                onClick={onVolver}
+                className="text-xs font-semibold gap-1.5 border-border shadow-xs hover:bg-accent"
               >
-                <PlusCircle className="w-4 h-4" />
-                <span>Registrar Nuevo Estudio</span>
-              </Button>
-            )}
-            {onVolver && (
-              <Button type="button" variant="outline" onClick={onVolver} className="text-xs">
-                Mi Dashboard
+                <span>Ir a mi portal</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </Button>
             )}
           </div>
@@ -540,7 +552,10 @@ export const EstudiosDirectoryView: React.FC<EstudiosDirectoryViewProps> = ({
           {estudiosFiltrados.map((estudio) => {
             const esActivo = estudio.id === empresaId
             const colorPrimario = estudio.color_primario || '#DC2626'
-            const coverImage = getCategoryCoverImage(estudio.tipo_negocio)
+            const bannerImage =
+              estudio.portada_url && !brokenPortadas[estudio.id]
+                ? estudio.portada_url
+                : getCategoryCoverImage(estudio.tipo_negocio)
             const hasValidLogo = Boolean(estudio.logo_url) && !brokenLogos[estudio.id]
 
             return (
@@ -556,27 +571,55 @@ export const EstudiosDirectoryView: React.FC<EstudiosDirectoryViewProps> = ({
                   }
                 }}
                 aria-label={`Ingresar al estudio ${estudio.nombre}`}
-                className={`group flex flex-col justify-between transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 border overflow-hidden cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                  esActivo ? 'ring-2 ring-primary border-primary shadow-sm bg-primary/5' : 'bg-card'
-                }`}
+                className={`group flex flex-col justify-between transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 border overflow-hidden cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${esActivo ? 'ring-2 ring-primary border-primary shadow-sm bg-primary/5' : 'bg-card'
+                  }`}
               >
                 <div>
-                  {/* Encabezado con fotografía del estudio / categoría y logo de marca blanca */}
-                  <div className="relative h-40 bg-slate-900 flex items-center justify-center overflow-hidden">
+                  {/* Encabezado con fotografía de portada del estudio o categoría */}
+                  <div className="relative h-36 sm:h-40 bg-slate-900 flex items-center justify-center overflow-hidden">
                     <img
-                      src={coverImage}
+                      src={bannerImage}
                       alt={estudio.tipo_negocio ? `${estudio.nombre} - ${estudio.tipo_negocio}` : estudio.nombre}
-                      className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-80"
+                      onError={() =>
+                        setBrokenPortadas((prev) => ({
+                          ...prev,
+                          [estudio.id]: true,
+                        }))
+                      }
+                      className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/40 to-black/30" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
 
-                    {/* Logo flotante si existe */}
-                    {hasValidLogo && (
-                      <div className="relative z-10 px-3 py-2 rounded-xl bg-white/95 dark:bg-slate-950/90 shadow-lg backdrop-blur-xs border border-white/20 max-w-[75%]">
+                    {/* Barra superior de badges sobre la portada (sin superposición) */}
+                    <div className="absolute top-3 inset-x-3 z-10 flex items-center justify-between gap-2">
+                      {/* Etiqueta de rubro a la izquierda con recorte elegante si es larga */}
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-black/65 text-white backdrop-blur-md border border-white/15 min-w-0">
+                        <Tag className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{estudio.tipo_negocio || 'Estudio'}</span>
+                      </span>
+
+                      {/* Badge de estado a la derecha */}
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/95 text-white shadow-sm backdrop-blur-xs border border-white/25 shrink-0">
+                        <Check className="w-3 h-3 stroke-[3] shrink-0" />
+                        <span>{esActivo ? 'Actual' : 'Activo'}</span>
+                      </span>
+                    </div>
+
+                    {/* Franja delgada con el color de marca del estudio en la base de la portada */}
+                    <div
+                      className="absolute bottom-0 left-0 right-0 h-1 z-10"
+                      style={{ backgroundColor: colorPrimario }}
+                    />
+                  </div>
+
+                  {/* Logo del estudio superpuesto en la esquina inferior izquierda estilo red moderna */}
+                  <div className="relative px-4 -mt-7 sm:-mt-8 flex items-end justify-between z-20 pointer-events-none">
+                    <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl border-4 border-white dark:border-card bg-white dark:bg-slate-900 shadow-md flex items-center justify-center overflow-hidden shrink-0 pointer-events-auto">
+                      {hasValidLogo ? (
                         <img
                           src={estudio.logo_url || ''}
                           alt={`Logotipo de ${estudio.nombre}`}
-                          className="max-h-14 max-w-full object-contain mx-auto"
+                          className="w-full h-full object-contain p-1"
                           onError={() =>
                             setBrokenLogos((prev) => ({
                               ...prev,
@@ -584,43 +627,21 @@ export const EstudiosDirectoryView: React.FC<EstudiosDirectoryViewProps> = ({
                             }))
                           }
                         />
-                      </div>
-                    )}
-
-                    {/* Categoría de negocio arriba a la izquierda */}
-                    <div className="absolute top-3 left-3 z-10 max-w-[65%]">
-                      <Badge className="bg-slate-950/80 hover:bg-slate-950/90 text-white border border-white/15 backdrop-blur-xs text-[10px] font-semibold gap-1 truncate max-w-full">
-                        <Tag className="w-3 h-3 shrink-0" />
-                        <span className="truncate">{estudio.tipo_negocio || 'Centro / Estudio'}</span>
-                      </Badge>
+                      ) : (
+                        <div
+                          className="w-full h-full flex items-center justify-center font-black text-white text-base sm:text-lg select-none shadow-inner"
+                          style={{ backgroundColor: colorPrimario }}
+                        >
+                          {getStudioInitials(estudio.nombre)}
+                        </div>
+                      )}
                     </div>
-
-                    {/* Badge de Estudio Actual arriba a la derecha */}
-                    {esActivo && (
-                      <div className="absolute top-3 right-3 z-10 bg-emerald-500 text-white text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full shadow-md flex items-center gap-1">
-                        <Check className="w-3 h-3" />
-                        <span>Activo</span>
-                      </div>
-                    )}
-
-                    {/* Franja de Color Primario de Marca Blanca */}
-                    <div
-                      className="absolute bottom-0 left-0 right-0 h-1.5 z-10"
-                      style={{ backgroundColor: colorPrimario }}
-                    />
                   </div>
 
-                  <CardHeader className="p-4 pb-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <CardTitle className="text-base font-bold text-foreground line-clamp-1">
-                        {estudio.nombre}
-                      </CardTitle>
-                      <div
-                        className="w-5 h-5 rounded-full border shadow-sm shrink-0"
-                        style={{ backgroundColor: colorPrimario }}
-                        title={`Color de Marca: ${colorPrimario}`}
-                      />
-                    </div>
+                  <CardHeader className="p-4 pt-2 pb-2">
+                    <CardTitle className="text-base font-bold text-foreground line-clamp-1">
+                      {estudio.nombre}
+                    </CardTitle>
                     {estudio.slug && (
                       <CardDescription className="text-[11px] font-mono text-muted-foreground">
                         @{estudio.slug}
@@ -628,7 +649,7 @@ export const EstudiosDirectoryView: React.FC<EstudiosDirectoryViewProps> = ({
                     )}
                   </CardHeader>
 
-                  <CardContent className="p-4 pt-1 space-y-2.5 text-xs">
+                  <CardContent className="p-4 pt-1 space-y-2 text-xs">
                     {/* Dirección, resumen de horarios y contacto */}
                     <div className="space-y-1.5 text-muted-foreground">
                       <div className="flex items-start gap-2">
@@ -657,21 +678,6 @@ export const EstudiosDirectoryView: React.FC<EstudiosDirectoryViewProps> = ({
                         </div>
                       )}
                     </div>
-
-                    {/* Capacidad e Identidad */}
-                    <div className="flex flex-wrap items-center gap-2 pt-2 border-t">
-                      <Badge variant="outline" className="text-[10px] font-semibold flex items-center gap-1">
-                        <Bike className="w-3 h-3" />
-                        <span>Capacidad: {estudio.capacidad_sala || 15} cupos</span>
-                      </Badge>
-                      <Badge
-                        variant="secondary"
-                        className="text-[10px] font-mono flex items-center gap-1 uppercase"
-                      >
-                        <Palette className="w-3 h-3" />
-                        <span>{colorPrimario}</span>
-                      </Badge>
-                    </div>
                   </CardContent>
                 </div>
 
@@ -687,7 +693,7 @@ export const EstudiosDirectoryView: React.FC<EstudiosDirectoryViewProps> = ({
                     className="w-full text-xs font-bold text-white shadow-sm hover:opacity-90 flex items-center justify-center gap-1.5 cursor-pointer"
                     style={{ backgroundColor: colorPrimario }}
                   >
-                    <span>{esActivo ? 'Ver Horarios y Reservar' : 'Ingresar a este Estudio'}</span>
+                    <span>{esActivo ? 'Reservar Clase' : 'Entrar al Estudio'}</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </Button>
                 </div>

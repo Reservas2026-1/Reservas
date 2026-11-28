@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { gamificacionService } from './gamificacionService'
 import type {
   Tables,
   CrearReservaSeguraResponse,
@@ -19,20 +20,79 @@ export interface CrearReservaParams {
   tiqueteraId?: string | null
 }
 
+export interface CrearReservaAdminParams {
+  empresaId: string
+  claseId: string
+  clienteNombre: string
+  clienteEmail: string
+  clienteTelefono?: string
+  puestoNumero?: number
+  metodoPago?: string
+}
+
+export interface CrearReservaAdminResponse {
+  success: boolean
+  data: CrearReservaSeguraResponse | null
+  error: string | null
+}
+
 export interface ReservaDetallada extends Tables<'reservas'> {
   clase: Tables<'clases'> | null
   bicicleta: Tables<'bicicletas'> | null
   tiquetera: Tables<'tiqueteras'> | null
 }
 
+export interface ProximaReservaDetallada {
+  id: string
+  clase_id: string | null
+  clase_titulo: string
+  instructor_nombre: string
+  fecha: string
+  hora_inicio: string
+  hora_fin: string
+  bicicleta_id: string
+  bicicleta_numero: number
+  codigo_qr: string
+  estado: EstadoReserva
+  asistencia_confirmada: boolean
+  cliente_nombre: string
+  raw_reserva?: Tables<'reservas'>
+}
+
+
 export interface ServiceResponse<T> {
   data: T | null
   error: string | null
 }
 
+export interface XpOtorgados {
+  asistencia: number
+  puntualidad: number
+  bonoPlan: number
+  total: number
+}
+
+export interface ProgresoPlanGamificacion {
+  dias_programados: number
+  dias_cumplidos: number
+  porcentaje: number
+  bonoOtorgado: boolean
+}
+
+export interface AlumnoResumenQR {
+  id: string
+  nombre_completo: string
+  email: string
+  avatar_url?: string | null
+  codigo_qr?: string | null
+}
+
 export interface AsistenciaQRResponse {
   success: boolean
   reserva: ReservaDetallada | null
+  alumno?: AlumnoResumenQR | null
+  xpOtorgados?: XpOtorgados
+  progresoPlan?: ProgresoPlanGamificacion
   mensaje: string
   error: string | null
 }
@@ -710,6 +770,234 @@ export async function cancelarReservaRapida(
 }
 
 /**
+ * Crea una reserva directa desde el panel administrativo para un alumno/cliente.
+ * Permite seleccionar un puesto específico (puestoNumero) o asigna automáticamente el primer puesto disponible.
+ * Si el cliente ya existe en el sistema (por email), asocia su perfil.
+ * Ejecuta la transacción de reserva segura garantizando anti-colisión y opcionalmente registra el método de pago en notas.
+ */
+export async function crearReservaAdmin(
+  params: CrearReservaAdminParams
+): Promise<CrearReservaAdminResponse> {
+  try {
+    const {
+      empresaId,
+      claseId,
+      clienteNombre,
+      clienteEmail,
+      clienteTelefono,
+      puestoNumero,
+      metodoPago,
+    } = params
+
+    if (!empresaId?.trim()) {
+      return { success: false, data: null, error: 'El ID de la empresa es obligatorio' }
+    }
+    if (!claseId?.trim()) {
+      return { success: false, data: null, error: 'El ID de la clase es obligatorio' }
+    }
+    if (!clienteNombre?.trim()) {
+      return { success: false, data: null, error: 'El nombre del cliente es obligatorio' }
+    }
+    if (!clienteEmail?.trim()) {
+      return { success: false, data: null, error: 'El correo electrónico del cliente es obligatorio' }
+    }
+
+    const cleanEmpresaId = empresaId.trim()
+    const cleanClaseId = claseId.trim()
+    const cleanClienteNombre = clienteNombre.trim()
+    const cleanClienteEmail = clienteEmail.trim().toLowerCase()
+    const cleanTelefono = clienteTelefono?.trim() || null
+
+    // 1. Validar que la clase existe y no está cancelada
+    const { data: clase, error: claseError } = await supabase
+      .from('clases')
+      .select('id, empresa_id, fecha, hora_inicio, hora_fin, estado')
+      .eq('id', cleanClaseId)
+      .eq('empresa_id', cleanEmpresaId)
+      .maybeSingle()
+
+    if (claseError) {
+      return { success: false, data: null, error: claseError.message }
+    }
+    if (!clase) {
+      return { success: false, data: null, error: 'La clase especificada no existe en esta empresa' }
+    }
+    if (clase.estado === 'cancelada') {
+      return { success: false, data: null, error: 'No es posible crear reservas en una clase cancelada' }
+    }
+
+    // 2. Determinar la bicicleta o puesto a reservar
+    let targetBicicletaId: string | null = null
+
+    if (puestoNumero !== undefined && puestoNumero !== null) {
+      // Puesto específico solicitado por el administrador
+      const { data: bici, error: biciError } = await supabase
+        .from('bicicletas')
+        .select('id, numero, estado, activo')
+        .eq('empresa_id', cleanEmpresaId)
+        .eq('numero', puestoNumero)
+        .maybeSingle()
+
+      if (biciError) {
+        return { success: false, data: null, error: biciError.message }
+      }
+      if (!bici) {
+        return {
+          success: false,
+          data: null,
+          error: `El puesto o bicicleta #${puestoNumero} no existe en esta sede.`,
+        }
+      }
+      if (!bici.activo || bici.estado === 'mantenimiento' || bici.estado === 'baja') {
+        return {
+          success: false,
+          data: null,
+          error: `El puesto #${puestoNumero} no está disponible (estado: ${bici.estado || 'inactivo'}).`,
+        }
+      }
+
+      // Validar si el puesto ya está ocupado en la clase
+      const { data: resOcupada, error: checkError } = await supabase
+        .from('reservas')
+        .select('id')
+        .eq('clase_id', cleanClaseId)
+        .eq('bicicleta_id', bici.id)
+        .neq('estado', 'cancelada')
+        .maybeSingle()
+
+      if (checkError) {
+        return { success: false, data: null, error: checkError.message }
+      }
+      if (resOcupada) {
+        return {
+          success: false,
+          data: null,
+          error: `El puesto #${puestoNumero} ya está reservado para esta sesión.`,
+        }
+      }
+
+      targetBicicletaId = bici.id
+    } else {
+      // Asignar automáticamente el primer puesto libre disponible
+      const { data: bicis, error: bicisError } = await supabase
+        .from('bicicletas')
+        .select('id, numero, estado, activo')
+        .eq('empresa_id', cleanEmpresaId)
+        .eq('activo', true)
+        .eq('estado', 'disponible')
+        .order('numero', { ascending: true })
+
+      if (bicisError) {
+        return { success: false, data: null, error: bicisError.message }
+      }
+      if (!bicis || bicis.length === 0) {
+        return {
+          success: false,
+          data: null,
+          error: 'No hay bicicletas activas configuradas para esta sede.',
+        }
+      }
+
+      // Consultar bicicletas ya ocupadas en la clase
+      const { data: reservasClase, error: ocupadasError } = await supabase
+        .from('reservas')
+        .select('bicicleta_id')
+        .eq('clase_id', cleanClaseId)
+        .neq('estado', 'cancelada')
+
+      if (ocupadasError) {
+        return { success: false, data: null, error: ocupadasError.message }
+      }
+
+      const ocupadasSet = new Set((reservasClase || []).map((r) => r.bicicleta_id))
+      const primeraDisponible = bicis.find((b) => !ocupadasSet.has(b.id))
+
+      if (!primeraDisponible) {
+        return {
+          success: false,
+          data: null,
+          error: 'La clase se encuentra al 100% de capacidad. No hay puestos libres disponibles.',
+        }
+      }
+
+      targetBicicletaId = primeraDisponible.id
+    }
+
+    // 3. Buscar si el cliente ya está registrado en perfiles para asociar su cliente_id
+    let targetClienteId: string | null = null
+    let clienteDoc = 'S/D'
+
+    const { data: perfilCliente } = await supabase
+      .from('perfiles')
+      .select('id, documento, telefono')
+      .eq('email', cleanClienteEmail)
+      .maybeSingle()
+
+    if (perfilCliente) {
+      targetClienteId = perfilCliente.id
+      if (perfilCliente.documento) {
+        clienteDoc = perfilCliente.documento
+      }
+    }
+
+    // 4. Invocar función RPC transaccional anti-colisión
+    const { data: rpcData, error: rpcError } = await supabase.rpc('crear_reserva_segura', {
+      p_empresa_id: cleanEmpresaId,
+      p_clase_id: cleanClaseId,
+      p_bicicleta_id: targetBicicletaId,
+      p_cliente_id: targetClienteId,
+      p_cliente_nombre: cleanClienteNombre,
+      p_cliente_documento: clienteDoc,
+      p_cliente_telefono: cleanTelefono || perfilCliente?.telefono || 'N/A',
+      p_cliente_email: cleanClienteEmail,
+      p_tiquetera_id: null,
+    })
+
+    if (rpcError) {
+      return { success: false, data: null, error: rpcError.message }
+    }
+
+    const response = rpcData as unknown as CrearReservaSeguraResponse
+
+    if (!response.success) {
+      return {
+        success: false,
+        data: response,
+        error: response.error || 'No se pudo crear la reserva administrativa',
+      }
+    }
+
+    // 5. Registrar método de pago y notas de auditoría administrativa si aplica
+    if (response.reserva_id) {
+      const notaPago = metodoPago?.trim()
+        ? `Reserva administrativa directa. Pago: ${metodoPago.trim()}`
+        : 'Reserva administrativa directa'
+
+      await supabase
+        .from('reservas')
+        .update({
+          notas: notaPago,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', response.reserva_id)
+    }
+
+    return {
+      success: true,
+      data: response,
+      error: null,
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Error inesperado al crear reserva administrativa'
+    return {
+      success: false,
+      data: null,
+      error: message,
+    }
+  }
+}
+
+/**
  * Servicio para Creación, Consulta y Cancelación de Reservas
  */
 export const reservasService = {
@@ -786,6 +1074,11 @@ export const reservasService = {
    * Crea múltiples reservas semanales en lote con deducción atómica de créditos.
    */
   crearReservasLote,
+
+  /**
+   * Crea una reserva directa desde el panel administrativo para un alumno/cliente.
+   */
+  crearReservaAdmin,
 
   /**
    * Cancela rápidamente una reserva eliminándola y reembolsando los créditos correspondientes.
@@ -990,9 +1283,11 @@ export const reservasService = {
   },
 
   /**
-   * Valida y registra la asistencia de un cliente mediante el escáner de código QR.
-   * Verifica que la reserva pertenezca a la empresa y opcionalmente a la clase actual.
-   * Actualiza 'asistencia_confirmada = true' y 'estado = finalizada' (asistencia completada).
+   * Valida y registra la asistencia de un cliente mediante escáner de código QR:
+   * 1. Soporta el Pase QR único del perfil del alumno (ej. RESERLY-XXXXXXXX) o el QR de reserva individual.
+   * 2. Si es Pase QR de perfil, busca la reserva confirmada/pendiente del alumno para la clase especificada o la más próxima de hoy.
+   * 3. Marca la reserva como 'asistencia_confirmada = true' y 'estado = finalizada'.
+   * 4. Calcula y otorga puntos de Gamificación (XP por Asistencia, Puntualidad y Bono de Plan cumplido).
    */
   async registrarAsistenciaQR(
     codigoQr: string,
@@ -1011,75 +1306,182 @@ export const reservasService = {
         }
       }
 
-      // 1. Buscar la reserva con sus relaciones
-      const { data, error: selectError } = await supabase
-        .from('reservas')
-        .select(`
-          *,
-          clase:clases!reservas_clase_id_fkey(*),
-          bicicleta:bicicletas!reservas_bicicleta_id_fkey(*),
-          tiquetera:tiqueteras!reservas_tiquetera_id_fkey(*)
-        `)
+      let reservaEncontrada: Tables<'reservas'> | null = null
+      let alumnoInfo: AlumnoResumenQR | null = null
+
+      // A) Intentar resolver si el código QR pertenece al Pase QR único de un perfil de alumno
+      const { data: perfilData } = await supabase
+        .from('perfiles')
+        .select('id, nombre_completo, email, avatar_url, codigo_qr, empresa_id')
         .eq('codigo_qr', codigoLimpio)
-        .eq('empresa_id', empresaId)
         .maybeSingle()
 
-      if (selectError) {
-        return {
-          success: false,
-          reserva: null,
-          mensaje: 'Error al consultar la reserva',
-          error: selectError.message,
+      if (perfilData) {
+        alumnoInfo = {
+          id: perfilData.id,
+          nombre_completo: perfilData.nombre_completo,
+          email: perfilData.email,
+          avatar_url: perfilData.avatar_url,
+          codigo_qr: perfilData.codigo_qr || codigoLimpio,
+        }
+
+        // Buscar la reserva del alumno para la empresa
+        let queryReserva = supabase
+          .from('reservas')
+          .select(`
+            *,
+            clase:clases!reservas_clase_id_fkey(*),
+            bicicleta:bicicletas!reservas_bicicleta_id_fkey(*),
+            tiquetera:tiqueteras!reservas_tiquetera_id_fkey(*)
+          `)
+          .eq('cliente_id', perfilData.id)
+          .eq('empresa_id', empresaId)
+
+        if (claseId) {
+          queryReserva = queryReserva.eq('clase_id', claseId)
+        } else {
+          // Si no se pasó claseId, buscar reservas activas de hoy en adelante o la más cercana
+          const hoyInicio = new Date()
+          hoyInicio.setHours(0, 0, 0, 0)
+          queryReserva = queryReserva
+            .gte('fecha_inicio', hoyInicio.toISOString())
+            .in('estado', ['confirmada', 'pendiente', 'en_curso', 'finalizada'])
+            .order('fecha_inicio', { ascending: true })
+        }
+
+        const { data: reservasAlumno, error: resError } = await queryReserva.limit(1)
+
+        if (resError) {
+          return {
+            success: false,
+            reserva: null,
+            alumno: alumnoInfo,
+            mensaje: 'Error al consultar la reserva del alumno',
+            error: resError.message,
+          }
+        }
+
+        if (!reservasAlumno || reservasAlumno.length === 0) {
+          return {
+            success: false,
+            reserva: null,
+            alumno: alumnoInfo,
+            mensaje: 'El alumno no cuenta con una reserva activa para esta sesión',
+            error: 'Reserva inexistente',
+          }
+        }
+
+        reservaEncontrada = reservasAlumno[0] as unknown as Tables<'reservas'>
+      } else {
+        // B) Si no es un QR de perfil, buscar como código QR directo de una reserva
+        const { data: reservaPorQr, error: selectError } = await supabase
+          .from('reservas')
+          .select(`
+            *,
+            clase:clases!reservas_clase_id_fkey(*),
+            bicicleta:bicicletas!reservas_bicicleta_id_fkey(*),
+            tiquetera:tiqueteras!reservas_tiquetera_id_fkey(*)
+          `)
+          .eq('codigo_qr', codigoLimpio)
+          .eq('empresa_id', empresaId)
+          .maybeSingle()
+
+        if (selectError) {
+          return {
+            success: false,
+            reserva: null,
+            mensaje: 'Error al consultar la reserva por QR',
+            error: selectError.message,
+          }
+        }
+
+        if (!reservaPorQr) {
+          return {
+            success: false,
+            reserva: null,
+            mensaje: 'Código QR no encontrado o no pertenece a esta sede',
+            error: 'Reserva o pase inexistente',
+          }
+        }
+
+        reservaEncontrada = reservaPorQr as unknown as Tables<'reservas'>
+
+        // Obtener datos del alumno si tiene cliente_id asociado
+        if (reservaEncontrada.cliente_id) {
+          const { data: perfilCliente } = await supabase
+            .from('perfiles')
+            .select('id, nombre_completo, email, avatar_url, codigo_qr')
+            .eq('id', reservaEncontrada.cliente_id)
+            .maybeSingle()
+
+          if (perfilCliente) {
+            alumnoInfo = {
+              id: perfilCliente.id,
+              nombre_completo: perfilCliente.nombre_completo,
+              email: perfilCliente.email,
+              avatar_url: perfilCliente.avatar_url,
+              codigo_qr: perfilCliente.codigo_qr,
+            }
+          }
+        }
+
+        if (!alumnoInfo) {
+          alumnoInfo = {
+            id: reservaEncontrada.cliente_id || 'invitado',
+            nombre_completo: reservaEncontrada.cliente_nombre,
+            email: reservaEncontrada.cliente_email || '',
+            avatar_url: null,
+            codigo_qr: reservaEncontrada.codigo_qr,
+          }
         }
       }
 
-      if (!data) {
+      // Validar que la reserva no esté cancelada
+      if (reservaEncontrada.estado === 'cancelada') {
         return {
           success: false,
           reserva: null,
-          mensaje: 'Código QR no encontrado o no pertenece a esta sede',
-          error: 'Reserva inexistente',
-        }
-      }
-
-      // 2. Validar que no esté cancelada
-      if (data.estado === 'cancelada') {
-        return {
-          success: false,
-          reserva: null,
+          alumno: alumnoInfo,
           mensaje: 'Esta reserva fue cancelada previamente y no es válida para ingreso',
           error: 'Reserva cancelada',
         }
       }
 
-      // 3. Si se especificó una clase, verificar que coincida
-      if (claseId && data.clase_id !== claseId) {
+      // Si se especificó una clase, verificar coincidencia
+      if (claseId && reservaEncontrada.clase_id !== claseId) {
         return {
           success: false,
           reserva: null,
+          alumno: alumnoInfo,
           mensaje: 'El código QR corresponde a una clase diferente a la seleccionada',
           error: 'Clase no coincide',
         }
       }
 
-      // 4. Si ya fue confirmada, informar
-      if (data.asistencia_confirmada) {
-        const reservaDetallada: ReservaDetallada = {
-          ...data,
-          clase: (data.clase as unknown as Tables<'clases'>) || null,
-          bicicleta: (data.bicicleta as unknown as Tables<'bicicletas'>) || null,
-          tiquetera: (data.tiquetera as unknown as Tables<'tiqueteras'>) || null,
-        }
+      // Si la asistencia ya fue confirmada previamente, retornar respuesta informativa
+      const dataRel = reservaEncontrada as unknown as {
+        clase?: Tables<'clases'> | null
+        bicicleta?: Tables<'bicicletas'> | null
+        tiquetera?: Tables<'tiqueteras'> | null
+      }
+      const reservaDetallada: ReservaDetallada = {
+        ...reservaEncontrada,
+        clase: dataRel.clase || null,
+        bicicleta: dataRel.bicicleta || null,
+        tiquetera: dataRel.tiquetera || null,
+      }
 
+      if (reservaEncontrada.asistencia_confirmada) {
         return {
           success: true,
           reserva: reservaDetallada,
-          mensaje: `Asistencia ya registrada previamente para ${data.cliente_nombre} (Bicicleta #${reservaDetallada.bicicleta?.numero || 'N/A'})`,
+          alumno: alumnoInfo,
+          mensaje: `Asistencia ya registrada previamente para ${reservaEncontrada.cliente_nombre} (Bicicleta #${reservaDetallada.bicicleta?.numero || 'N/A'})`,
           error: null,
         }
       }
 
-      // 5. Actualizar la reserva: marcar asistencia confirmada y estado 'finalizada'
+      // Actualizar la reserva: marcar asistencia confirmada y estado 'finalizada'
       const { data: updatedReserva, error: updateError } = await supabase
         .from('reservas')
         .update({
@@ -1087,7 +1489,7 @@ export const reservasService = {
           estado: 'finalizada' as EstadoReserva,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', data.id)
+        .eq('id', reservaEncontrada.id)
         .select(`
           *,
           clase:clases!reservas_clase_id_fkey(*),
@@ -1096,12 +1498,13 @@ export const reservasService = {
         `)
         .single()
 
-      if (updateError) {
+      if (updateError || !updatedReserva) {
         return {
           success: false,
           reserva: null,
+          alumno: alumnoInfo,
           mensaje: 'No se pudo actualizar el estado de asistencia',
-          error: updateError.message,
+          error: updateError?.message || 'Error al actualizar reserva',
         }
       }
 
@@ -1112,10 +1515,42 @@ export const reservasService = {
         tiquetera: (updatedReserva.tiquetera as unknown as Tables<'tiqueteras'>) || null,
       }
 
+      // Procesar gamificación (XP por asistencia, puntualidad y bono plan)
+      let xpOtorgados: XpOtorgados = {
+        asistencia: 100,
+        puntualidad: 0,
+        bonoPlan: 0,
+        total: 100,
+      }
+      let progresoPlan: ProgresoPlanGamificacion = {
+        dias_programados: 0,
+        dias_cumplidos: 1,
+        porcentaje: 0,
+        bonoOtorgado: false,
+      }
+
+      if (reservaActualizada.cliente_id) {
+        const gamificacionRes = await gamificacionService.procesarAsistenciaGamificacion({
+          usuarioId: reservaActualizada.cliente_id,
+          empresaId,
+          reservaId: reservaActualizada.id,
+          fechaInicioClase: reservaActualizada.fecha_inicio,
+          tiqueteraId: reservaActualizada.tiquetera_id,
+        })
+
+        if (gamificacionRes.data) {
+          xpOtorgados = gamificacionRes.data.xpOtorgados
+          progresoPlan = gamificacionRes.data.progresoPlan
+        }
+      }
+
       return {
         success: true,
         reserva: reservaActualizada,
-        mensaje: `¡Bienvenido(a) ${reservaActualizada.cliente_nombre}! Asistencia confirmada en Bicicleta #${reservaActualizada.bicicleta?.numero || 'N/A'}.`,
+        alumno: alumnoInfo,
+        xpOtorgados,
+        progresoPlan,
+        mensaje: `¡Bienvenido(a) ${reservaActualizada.cliente_nombre}! Asistencia confirmada (+${xpOtorgados.total} XP). Bicicleta #${reservaActualizada.bicicleta?.numero || 'N/A'}.`,
         error: null,
       }
     } catch (err) {
@@ -1336,4 +1771,95 @@ export const reservasService = {
       return { data: null, error: message }
     }
   },
+
+  /**
+   * Consulta la próxima reserva activa del usuario (fecha_reserva >= hoy, estado != 'cancelada'),
+   * ordenada por fecha y hora de inicio ascendente (limit 1).
+   * Retorna la reserva detallada con clase, instructor, puesto/bici asignada y código QR.
+   */
+  async obtenerProximaReservaUsuario(
+    usuarioId: string,
+    empresaId: string
+  ): Promise<ServiceResponse<ProximaReservaDetallada> & Partial<ProximaReservaDetallada>> {
+    try {
+      if (!usuarioId?.trim() || !empresaId?.trim()) {
+        return { data: null, error: 'usuarioId y empresaId son requeridos' }
+      }
+
+      const cleanUserId = usuarioId.trim()
+      const cleanEmpresaId = empresaId.trim()
+      const hoyStr = new Date().toISOString().split('T')[0]
+
+      const { data, error } = await supabase
+        .from('reservas')
+        .select(`
+          *,
+          clase:clases!reservas_clase_id_fkey(
+            id,
+            titulo,
+            fecha,
+            hora_inicio,
+            hora_fin,
+            instructor:perfiles!clases_instructor_id_fkey(id, nombre_completo)
+          ),
+          bicicleta:bicicletas!reservas_bicicleta_id_fkey(id, numero, modelo)
+        `)
+        .eq('cliente_id', cleanUserId)
+        .eq('empresa_id', cleanEmpresaId)
+        .neq('estado', 'cancelada')
+        .gte('fecha_reserva', hoyStr)
+        .order('fecha_reserva', { ascending: true })
+        .order('fecha_inicio', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+
+      if (error) {
+        return { data: null, error: error.message }
+      }
+
+      if (!data) {
+        return { data: null, error: null }
+      }
+
+      const claseData = data.clase as unknown as {
+        id: string
+        titulo: string
+        fecha: string
+        hora_inicio: string
+        hora_fin: string
+        instructor: { id: string; nombre_completo: string } | null
+      } | null
+
+      const biciData = data.bicicleta as unknown as { id: string; numero: number; modelo?: string } | null
+
+      const proxima: ProximaReservaDetallada = {
+        id: data.id,
+        clase_id: data.clase_id,
+        clase_titulo: claseData?.titulo || 'Clase Indoor Cycling',
+        instructor_nombre: claseData?.instructor?.nombre_completo || 'Instructor',
+        fecha: claseData?.fecha || data.fecha_reserva || (data.fecha_inicio ? data.fecha_inicio.split('T')[0] : hoyStr),
+        hora_inicio: claseData?.hora_inicio || (data.fecha_inicio ? data.fecha_inicio.split('T')[1]?.substring(0, 5) : '00:00'),
+        hora_fin: claseData?.hora_fin || (data.fecha_fin ? data.fecha_fin.split('T')[1]?.substring(0, 5) : '00:00'),
+        bicicleta_id: data.bicicleta_id,
+        bicicleta_numero: biciData?.numero || 0,
+        codigo_qr: data.codigo_qr || `RESERVA-${data.id.slice(0, 8).toUpperCase()}`,
+        estado: data.estado,
+        asistencia_confirmada: data.asistencia_confirmada,
+        cliente_nombre: data.cliente_nombre,
+        raw_reserva: data,
+      }
+
+      return {
+        data: proxima,
+        error: null,
+        ...proxima,
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error al obtener la próxima reserva'
+      return { data: null, error: message }
+    }
+  },
 }
+
+export const obtenerProximaReservaUsuario = reservasService.obtenerProximaReservaUsuario.bind(reservasService)
+

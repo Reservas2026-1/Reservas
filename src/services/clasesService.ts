@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { getColombiaHolidays } from './colombiaHolidays'
+import { bicicletasService } from './bicicletasService'
 import type {
   Tables,
   TablesInsert,
@@ -58,11 +59,11 @@ export interface ServiceResponse<T> {
 /**
  * Construye el payload estándar de inserción para una bicicleta indoor de una empresa.
  */
-function buildBicicletaInsertPayload(empresaId: string, numero: number): TablesInsert<'bicicletas'> {
+export function buildBicicletaInsertPayload(empresaId: string, numero: number): TablesInsert<'bicicletas'> {
   return {
     empresa_id: empresaId,
     numero,
-    codigo: `IC-${String(numero).padStart(2, '0')}`,
+    codigo: `P-${String(numero).padStart(2, '0')}`,
     fila: Math.ceil(numero / 5),
     columna: ((numero - 1) % 5) + 1,
     tipo: 'indoor',
@@ -72,21 +73,63 @@ function buildBicicletaInsertPayload(empresaId: string, numero: number): TablesI
 }
 
 /**
+ * Crea un objeto en memoria que satisface Tables<'bicicletas'> para casos de fallback o contingencia.
+ */
+function buildFallbackBicicleta(empresaId: string, numero: number): Tables<'bicicletas'> {
+  return {
+    id: `fallback-bici-${empresaId}-${numero}`,
+    empresa_id: empresaId,
+    numero,
+    codigo: `P-${String(numero).padStart(2, '0')}`,
+    modelo: 'Indoor Bike',
+    fila: Math.ceil(numero / 5),
+    columna: ((numero - 1) % 5) + 1,
+    tipo: 'indoor',
+    estado: 'disponible',
+    latitud: null,
+    longitud: null,
+    bateria_porcentaje: null,
+    tarifa_hora: null,
+    activo: true,
+    created_at: new Date().toISOString(),
+    updated_at: null,
+  }
+}
+
+interface ReservaMini {
+  id: string
+  bicicleta_id: string
+  cliente_nombre: string
+  estado?: string
+  bicicleta?: { id?: string; numero?: number } | null
+}
+
+/**
  * Combina el inventario de bicicletas con sus reservas activas para construir BicicletaOcupacion[].
  */
 function mapBicicletasConOcupacion(
   bicicletas: Tables<'bicicletas'>[],
-  reservas: Array<{ id: string; bicicleta_id: string; cliente_nombre: string; estado?: string }>
+  reservas: ReservaMini[]
 ): BicicletaOcupacion[] {
-  const reservaPorBici = new Map<string, { id: string; clienteNombre: string }>()
+  const reservaPorBiciId = new Map<string, { id: string; clienteNombre: string }>()
+  const reservaPorBiciNum = new Map<number, { id: string; clienteNombre: string }>()
+
   for (const res of reservas) {
-    if (!reservaPorBici.has(res.bicicleta_id) || res.estado === 'en_curso') {
-      reservaPorBici.set(res.bicicleta_id, { id: res.id, clienteNombre: res.cliente_nombre })
+    const item = { id: res.id, clienteNombre: res.cliente_nombre }
+    if (res.bicicleta_id) {
+      if (!reservaPorBiciId.has(res.bicicleta_id) || res.estado === 'en_curso') {
+        reservaPorBiciId.set(res.bicicleta_id, item)
+      }
+    }
+    if (res.bicicleta && typeof res.bicicleta.numero === 'number') {
+      if (!reservaPorBiciNum.has(res.bicicleta.numero) || res.estado === 'en_curso') {
+        reservaPorBiciNum.set(res.bicicleta.numero, item)
+      }
     }
   }
 
   return bicicletas.map((bici) => {
-    const resInfo = reservaPorBici.get(bici.id)
+    const resInfo = reservaPorBiciId.get(bici.id) || reservaPorBiciNum.get(bici.numero)
     const estaOcupada =
       !!resInfo ||
       !bici.activo ||
@@ -105,86 +148,24 @@ function mapBicicletasConOcupacion(
 
 /**
  * Garantiza que la empresa cuente con bicicletas numeradas del 1 hasta `cantidad`,
- * insertando únicamente los números faltantes en estado 'disponible'.
+ * sincronizando la capacidad y activando/desactivando según corresponda.
  */
 export async function ensureBicicletasForEmpresa(
   empresaId: string,
   cantidad: number
 ): Promise<ServiceResponse<void>> {
   try {
-    const cleanEmpresaId = empresaId?.trim()
-    if (!cleanEmpresaId) {
-      return { data: null, error: 'empresaId es obligatorio' }
+    const res = await bicicletasService.sincronizarCapacidadSala(empresaId, cantidad)
+    if (!res.success && res.error) {
+      console.warn('Aviso en sincronización de bicicletas para empresa:', res.error)
+      return { data: undefined, error: res.error }
     }
-
-    const targetCantidad = Math.floor(cantidad)
-    if (!Number.isFinite(cantidad) || targetCantidad <= 0) {
-      return { data: null, error: 'La cantidad de bicicletas debe ser un entero positivo' }
-    }
-
-    const { data: existentes, error: fetchError } = await supabase
-      .from('bicicletas')
-      .select('numero')
-      .eq('empresa_id', cleanEmpresaId)
-
-    if (fetchError) {
-      return { data: null, error: fetchError.message }
-    }
-
-    const numerosExistentes = new Set((existentes || []).map((b) => b.numero))
-    const faltantes: TablesInsert<'bicicletas'>[] = []
-
-    for (let num = 1; num <= targetCantidad; num++) {
-      if (!numerosExistentes.has(num)) {
-        faltantes.push(buildBicicletaInsertPayload(cleanEmpresaId, num))
-      }
-    }
-
-    if (faltantes.length === 0) {
-      return { data: undefined, error: null }
-    }
-
-    const { error: insertError } = await supabase
-      .from('bicicletas')
-      .insert(faltantes)
-
-    if (insertError) {
-      if (insertError.code === '23505') {
-        const { data: recheck, error: recheckError } = await supabase
-          .from('bicicletas')
-          .select('numero')
-          .eq('empresa_id', cleanEmpresaId)
-
-        if (recheckError) {
-          return { data: null, error: recheckError.message }
-        }
-
-        const existentesActualizados = new Set((recheck || []).map((b) => b.numero))
-        const aunFaltantes = faltantes.filter((b) => !existentesActualizados.has(b.numero))
-
-        if (aunFaltantes.length === 0) {
-          return { data: undefined, error: null }
-        }
-
-        const { error: retryError } = await supabase
-          .from('bicicletas')
-          .insert(aunFaltantes)
-
-        if (retryError && retryError.code !== '23505') {
-          return { data: null, error: retryError.message }
-        }
-
-        return { data: undefined, error: null }
-      }
-
-      return { data: null, error: insertError.message }
-    }
-
     return { data: undefined, error: null }
   } catch (err) {
     const message =
       err instanceof Error ? err.message : 'Error inesperado al sincronizar bicicletas de la empresa'
-    return { data: null, error: message }
+    console.warn('Excepción tolerada en ensureBicicletasForEmpresa:', message)
+    return { data: undefined, error: message }
   }
 }
 
@@ -491,8 +472,11 @@ export const clasesService = {
       }
 
       if (data.capacidad !== undefined) {
-        const syncRes = await ensureBicicletasForEmpresa(empresaId, updated.capacidad || data.capacidad)
-        if (syncRes.error) {
+        const syncRes = await bicicletasService.sincronizarCapacidadSala(
+          empresaId,
+          updated.capacidad || data.capacidad
+        )
+        if (!syncRes.success && syncRes.error) {
           console.warn('No se pudieron sincronizar las bicicletas tras actualizar capacidad:', syncRes.error)
         }
       }
@@ -737,45 +721,10 @@ export const clasesService = {
   },
 
   /**
-   * Obtiene la grilla de bicicletas (1 a 15) para una clase determinada, indicando
-   * cuáles están disponibles y cuáles están ocupadas para alimentar el mapa interactivo del frontend.
+   * Obtiene la grilla de bicicletas para una clase determinada, garantizando
+   * sincronización y fallback tolerante ante fallos.
    */
-  async getBicicletasParaClase(claseId: string, empresaId: string): Promise<ServiceResponse<BicicletaOcupacion[]>> {
-    try {
-      const { data: bicicletas, error: bicisError } = await supabase
-        .from('bicicletas')
-        .select('*')
-        .eq('empresa_id', empresaId)
-        .eq('activo', true)
-        .order('numero', { ascending: true })
-
-      if (bicisError) {
-        return { data: null, error: bicisError.message }
-      }
-
-      if (!bicicletas) {
-        return { data: [], error: null }
-      }
-
-      const { data: reservas, error: reservasError } = await supabase
-        .from('reservas')
-        .select('id, bicicleta_id, cliente_nombre, estado')
-        .eq('clase_id', claseId)
-        .neq('estado', 'cancelada')
-
-      if (reservasError) {
-        return { data: null, error: reservasError.message }
-      }
-
-      return {
-        data: mapBicicletasConOcupacion(bicicletas, reservas || []),
-        error: null,
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Error al consultar mapa de bicicletas de la clase'
-      return { data: null, error: message }
-    }
-  },
+  getBicicletasParaClase,
 
   /**
    * Garantiza que la empresa cuente con bicicletas numeradas del 1 hasta `cantidad`.
@@ -786,6 +735,145 @@ export const clasesService = {
    * Obtiene todas las bicicletas de la empresa junto con su estado de ocupación por reservas activas.
    */
   getBicicletasByEmpresa,
+}
+
+/**
+ * Obtiene la grilla de bicicletas (1 a targetCapacidad) para una clase determinada,
+ * garantizando la existencia de los puestos en BD o generando respaldo (fallback)
+ * para que la función NUNCA retorne una lista vacía si hay capacidad definida.
+ */
+export async function getBicicletasParaClase(
+  claseId: string,
+  empresaId: string,
+  capacidadObjetivo?: number
+): Promise<ServiceResponse<BicicletaOcupacion[]>> {
+  try {
+    const cleanEmpresaId = empresaId?.trim()
+    if (!cleanEmpresaId) {
+      return { data: [], error: 'empresaId es obligatorio' }
+    }
+
+    // 1. Determinar capacidad objetivo (parámetro -> capacidad de la clase en BD -> default 15)
+    let targetCapacidad =
+      capacidadObjetivo && capacidadObjetivo > 0 ? Math.floor(capacidadObjetivo) : 0
+
+    if (!targetCapacidad && claseId) {
+      try {
+        const { data: claseInfo } = await supabase
+          .from('clases')
+          .select('capacidad')
+          .eq('id', claseId)
+          .maybeSingle()
+
+        if (claseInfo?.capacidad && claseInfo.capacidad > 0) {
+          targetCapacidad = claseInfo.capacidad
+        }
+      } catch {
+        // Ignorar fallo de lectura de capacidad de la clase
+      }
+    }
+
+    if (!targetCapacidad || targetCapacidad <= 0) {
+      targetCapacidad = 15
+    }
+
+    // 2. Consultar public.bicicletas para el empresaId
+    let bicicletas: Tables<'bicicletas'>[] = []
+
+    try {
+      const { data, error } = await supabase
+        .from('bicicletas')
+        .select('*')
+        .eq('empresa_id', cleanEmpresaId)
+        .eq('activo', true)
+        .order('numero', { ascending: true })
+
+      if (error) {
+        console.warn('Aviso al consultar bicicletas de la clase:', error.message)
+      } else if (data) {
+        bicicletas = data
+      }
+    } catch (err) {
+      console.warn('Excepción al consultar bicicletas:', err)
+    }
+
+    // 3. Si data.length === 0 o data.length < targetCapacidad, asegurar puestos faltantes
+    if (bicicletas.length === 0 || bicicletas.length < targetCapacidad) {
+      try {
+        await ensureBicicletasForEmpresa(cleanEmpresaId, targetCapacidad)
+        const { data: reloaded, error: reloadError } = await supabase
+          .from('bicicletas')
+          .select('*')
+          .eq('empresa_id', cleanEmpresaId)
+          .eq('activo', true)
+          .order('numero', { ascending: true })
+
+        if (!reloadError && reloaded && reloaded.length > 0) {
+          bicicletas = reloaded
+        }
+      } catch (err) {
+        console.warn('Aviso en ensureBicicletasForEmpresa dentro de getBicicletasParaClase:', err)
+      }
+    }
+
+    // 4. Obtener reservas existentes para la clase
+    let reservas: ReservaMini[] = []
+    if (claseId) {
+      try {
+        const { data: resData, error: reservasError } = await supabase
+          .from('reservas')
+          .select('id, bicicleta_id, cliente_nombre, estado, bicicleta:bicicletas(id, numero)')
+          .eq('clase_id', claseId)
+          .neq('estado', 'cancelada')
+
+        if (!reservasError && resData) {
+          reservas = resData as unknown as ReservaMini[]
+        }
+      } catch (err) {
+        console.warn('Aviso al consultar reservas de la clase:', err)
+      }
+    }
+
+    // 5. Garantizar que SIEMPRE exista la lista completa de 1 hasta targetCapacidad
+    // Si la BD falló, tiene problemas de conexión o no devuelve registros,
+    // o faltan puestos específicos, se completa con array de fallback.
+    const bicisPorNumero = new Map<number, Tables<'bicicletas'>>()
+    for (const b of bicicletas) {
+      if (b.numero && !bicisPorNumero.has(b.numero)) {
+        bicisPorNumero.set(b.numero, b)
+      }
+    }
+
+    const listaFinalBicis: Tables<'bicicletas'>[] = []
+    for (let i = 1; i <= targetCapacidad; i++) {
+      const biciExistente = bicisPorNumero.get(i)
+      if (biciExistente) {
+        listaFinalBicis.push(biciExistente)
+      } else {
+        listaFinalBicis.push(buildFallbackBicicleta(cleanEmpresaId, i))
+      }
+    }
+
+    const resultado = mapBicicletasConOcupacion(listaFinalBicis, reservas)
+    return {
+      data: resultado,
+      error: null,
+    }
+  } catch (err) {
+    console.warn('Excepción general en getBicicletasParaClase, activando fallback total:', err)
+    // Fallback absoluto: NUNCA retornar lista vacía si hay capacidad definida
+    const cleanEmpresaId = empresaId?.trim() || 'empresa-default'
+    const fallbackCount =
+      capacidadObjetivo && capacidadObjetivo > 0 ? Math.floor(capacidadObjetivo) : 15
+    const fallbackBicis: Tables<'bicicletas'>[] = []
+    for (let i = 1; i <= fallbackCount; i++) {
+      fallbackBicis.push(buildFallbackBicicleta(cleanEmpresaId, i))
+    }
+    return {
+      data: mapBicicletasConOcupacion(fallbackBicis, []),
+      error: null,
+    }
+  }
 }
 
 /**

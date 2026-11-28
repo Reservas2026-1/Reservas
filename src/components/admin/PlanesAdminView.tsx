@@ -44,7 +44,7 @@ export const PlanesAdminView: React.FC = () => {
     precio: '35000',
     creditos: '1',
     diasVigencia: '30',
-    duracionHoras: '1',
+    duracionMinutos: '45',
     activo: true,
   })
 
@@ -92,7 +92,7 @@ export const PlanesAdminView: React.FC = () => {
       precio: '35000',
       creditos: '1',
       diasVigencia: '30',
-      duracionHoras: '1',
+      duracionMinutos: '45',
       activo: true,
     })
     setModalPlan(true)
@@ -100,13 +100,18 @@ export const PlanesAdminView: React.FC = () => {
 
   const handleOpenEditar = (plan: Tables<'planes'>) => {
     setEditingPlan(plan)
+    const durMinutos = plan.duracion_horas
+      ? plan.duracion_horas < 10
+        ? Math.round(plan.duracion_horas * 60)
+        : plan.duracion_horas
+      : 45
     setFormPlan({
       nombre: plan.nombre,
       descripcion: plan.descripcion || '',
       precio: String(plan.precio),
       creditos: String(plan.creditos),
       diasVigencia: String(plan.dias_vigencia),
-      duracionHoras: String(plan.duracion_horas ?? 1),
+      duracionMinutos: String(durMinutos),
       activo: plan.activo,
     })
     setModalPlan(true)
@@ -121,7 +126,9 @@ export const PlanesAdminView: React.FC = () => {
       const precio = Number(formPlan.precio)
       const creditos = Number.parseInt(formPlan.creditos, 10)
       const diasVigencia = Number.parseInt(formPlan.diasVigencia, 10)
-      const duracionHoras = Number(formPlan.duracionHoras) || 1
+      const minutos = Number(formPlan.duracionMinutos) || 45
+      // Almacenamos en duracionHoras equivalente (ej: 45 min -> 1 hora o fracción)
+      const duracionHoras = Math.max(1, Math.round(minutos / 60))
 
       if (editingPlan) {
         const res = await adminService.actualizarPlan(editingPlan.id, empresaId, {
@@ -234,7 +241,7 @@ export const PlanesAdminView: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-6 w-full">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -338,6 +345,10 @@ export const PlanesAdminView: React.FC = () => {
                       <span className="flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5 text-blue-500" />
                         Vigencia: {plan.dias_vigencia} días
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-purple-500" />
+                        {plan.duracion_horas ? `${Math.round(plan.duracion_horas * 60)} min` : '45 min'} / sesión
                       </span>
                     </div>
                   </div>
@@ -448,14 +459,13 @@ export const PlanesAdminView: React.FC = () => {
                   </div>
                   <div className="space-y-1">
                     <label className="font-bold text-foreground">
-                      {verticalConfig.enableTiqueteras
-                        ? `Créditos / ${verticalConfig.sesionPlural}`
-                        : `Cantidad de ${verticalConfig.sesionPlural}`}
+                      Cantidad de {verticalConfig.sesionPlural} incluidas (Meta del Plan)
                     </label>
                     <Input
                       type="number"
                       min={1}
                       required
+                      placeholder="Ej: 5, 10, 20"
                       value={formPlan.creditos}
                       onChange={(e) => setFormPlan({ ...formPlan, creditos: e.target.value })}
                     />
@@ -474,13 +484,15 @@ export const PlanesAdminView: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="font-bold text-foreground">Duración Sesión (hrs)</label>
+                    <label className="font-bold text-foreground">Duración de la Sesión (minutos)</label>
                     <Input
                       type="number"
-                      min={0.5}
-                      step={0.5}
-                      value={formPlan.duracionHoras}
-                      onChange={(e) => setFormPlan({ ...formPlan, duracionHoras: e.target.value })}
+                      min={15}
+                      step={5}
+                      required
+                      placeholder="45"
+                      value={formPlan.duracionMinutos}
+                      onChange={(e) => setFormPlan({ ...formPlan, duracionMinutos: e.target.value })}
                     />
                   </div>
                 </div>

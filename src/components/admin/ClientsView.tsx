@@ -363,7 +363,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({ adminId = 'usr-admin-0
   })
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-6 w-full">
       <Card className="w-full border-border/80 shadow-sm">
         <CardHeader>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

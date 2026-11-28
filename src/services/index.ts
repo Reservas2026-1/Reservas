@@ -1,13 +1,27 @@
 // Centralización de Servicios Backend de Negocio
-export { authService, generateSlug } from './authService'
+export {
+  authService,
+  generateSlug,
+  registrarAlumno,
+  registrarCliente,
+  vincularEstudio,
+  actualizarPerfil,
+  subirAvatar,
+  registerStudio,
+  crearEstudioConAdmin,
+} from './authService'
 export type {
   SignUpParams,
+  SignUpResult,
+  RegistrarAlumnoParams,
   SignInParams,
+  CrearEstudioConAdminParams,
   RegisterStudioParams,
   RegisterStudioResult,
   EmpresaActiva,
   AuthResponse,
   AuthSessionData,
+  AlumnoBusqueda,
 } from './authService'
 
 export {
@@ -16,6 +30,7 @@ export {
   crearClaseEspecial,
   ensureBicicletasForEmpresa,
   getBicicletasByEmpresa,
+  getBicicletasParaClase,
 } from './clasesService'
 export type {
   BicicletaOcupacion,
@@ -29,12 +44,20 @@ export {
   reservasService,
   tiquetesService,
   crearReservasLote,
+  crearReservaAdmin,
   cancelarReservaRapida,
+  obtenerProximaReservaUsuario,
 } from './reservasService'
 export type {
   CrearReservaParams,
+  CrearReservaAdminParams,
+  CrearReservaAdminResponse,
   ReservaDetallada,
+  ProximaReservaDetallada,
   AsistenciaQRResponse,
+  XpOtorgados,
+  ProgresoPlanGamificacion,
+  AlumnoResumenQR,
   InscribirListaEsperaResult,
   EstadoListaEsperaUsuario,
   AlumnoEnEspera,
@@ -63,7 +86,7 @@ export type {
   SubirComprobanteResponse,
 } from './pagosService'
 
-export { adminService } from './adminService'
+export { adminService, obtenerMetricasDashboardEjecutivo } from './adminService'
 export type {
   DashboardMetricas,
   AlumnoInscrito,
@@ -80,12 +103,28 @@ export type {
   EstadisticasIngresosResumen,
   PagosFiltros,
   PagoFiltradoDetallado,
+  PeriodoDashboard,
+  KpisDashboardEjecutivo,
+  PuntoGraficaIngresosReservas,
+  FranjaHoraPico,
+  RendimientoPlanItem,
+  DesgloseEstadosReservas,
+  TopClienteItem,
+  MetricasDashboardEjecutivo,
 } from './adminService'
 
-export { empresasService } from './empresasService'
+export {
+  empresasService,
+  actualizarEmpresa,
+  subirLogoEmpresa,
+  subirPortadaEmpresa,
+  getEstudiosUsuario,
+  registrarEstudio,
+} from './empresasService'
 export type {
   EstudioActivo,
   ActualizarConfiguracionEstudioParams,
+  ActualizarEmpresaParams,
   RegistrarEstudioParams,
   SubirLogoResponse,
 } from './empresasService'
@@ -97,3 +136,43 @@ export type {
 
 export { metricasService, obtenerMetricasUsuario } from './metricasService'
 export type { MetricasUsuario } from './metricasService'
+
+export {
+  gamificacionService,
+  REGLAS_XP_DEFAULT,
+  calcularNivelUsuario,
+  obtenerRankingPorPlan,
+  obtenerPremiosPlan,
+  obtenerPremiosPorPlan,
+  guardarPremioPlan,
+  eliminarPremioPlan,
+  marcarPremioEntregado,
+  obtenerResumenGamificacionEmpresa,
+  obtenerInsigniasUsuario,
+  obtenerHistorialAsistencias,
+} from './gamificacionService'
+export type {
+  ReglaXPSeed,
+  CrearReglaXPParams,
+  ProgresoGamificacionUsuario,
+  AlumnoGamificacionResumen,
+  GuardarPremioPlanParams,
+  XpOtorgadosDetalle,
+  ProcesarAsistenciaParams,
+  ProcesarAsistenciaResult,
+  RankingPlanItem,
+  RankingPorPlanResult,
+  PremioPlanPodio,
+  InsigniaUsuario,
+  HistorialAsistenciaItem,
+} from './gamificacionService'
+
+export { bicicletasService } from './bicicletasService'
+export type {
+  CrearBicicletaParams,
+  CrearBicicletasEnLoteParams,
+  ObtenerBicicletasOptions,
+  MetricasBicicletas,
+  SincronizarCapacidadResponse,
+  EliminarBicicletaResponse,
+} from './bicicletasService'

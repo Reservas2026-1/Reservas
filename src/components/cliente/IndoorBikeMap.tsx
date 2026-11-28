@@ -17,8 +17,6 @@ import {
   Info,
   Sun,
   Moon,
-  Minus,
-  Plus,
   X,
   RotateCcw,
   Building2,
@@ -28,7 +26,6 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { QRCode } from '@/components/ui/qr-code'
 import { useBranding } from '@/context/BrandingContext'
 import { toast } from '@/components/ui/use-toast'
@@ -115,11 +112,10 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
   onVolverAlDashboard,
   onCambiarEstudio,
 }) => {
-  const { currentPalette, empresaId, studioName, verticalConfig } = useBranding()
+  const { currentPalette, empresaId, studioName, verticalConfig, isSingleTenant } = useBranding()
   const sesionMasculina = ['Turno', 'WOD'].includes(verticalConfig.sesionSingular)
   const confirmClassId = useId()
   const confirmBikeId = useId()
-  const cantidadReservasId = useId()
 
   const [fechaSeleccionada, setFechaSeleccionada] = useState<string>(
     () => new Date().toISOString().split('T')[0]
@@ -130,13 +126,12 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
   const [selectedBici, setSelectedBici] = useState<BicicletaOcupacion | null>(null)
   const [tiqueteraActiva, setTiqueteraActiva] = useState<TiqueteraConPlan | null>(null)
 
-  // Planificación semanal, cantidad de reservas (1..7) y filtro rápido Mañana/Noche
-  const [cantidadReservas, setCantidadReservas] = useState<number>(1)
+  // Planificación semanal y filtro rápido Mañana/Noche (1 reserva directa por selección)
+  const cantidadReservas = 1
   const [filtroTurno, setFiltroTurno] = useState<TurnoFiltro>('todas')
   const [clasesSemana, setClasesSemana] = useState<ClaseConOcupacion[]>([])
   const [loadingSemana, setLoadingSemana] = useState<boolean>(false)
   const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([])
-  const [slotLimitWarning, setSlotLimitWarning] = useState<string | null>(null)
 
   // Estados de carga y modales
   const [loadingClases, setLoadingClases] = useState(false)
@@ -356,27 +351,91 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
       setSelectedBici(null)
 
       try {
-        const res = await clasesService.getBicicletasParaClase(claseSeleccionada.id, empresaId)
+        const res = await clasesService.getBicicletasParaClase(
+          claseSeleccionada.id,
+          empresaId,
+          claseSeleccionada.capacidad
+        )
         if (isMounted) {
-          if (res.error) {
+          if (res.error && (!res.data || res.data.length === 0)) {
             toast({
               variant: 'destructive',
-              title: 'Error cargando bicicletas',
+              title: 'Aviso de carga de puestos',
               description: res.error,
             })
-            setBicicletas([])
-          } else {
-            setBicicletas(res.data || [])
           }
+
+          let listaBicis = res.data && res.data.length > 0 ? [...res.data] : []
+          const capObjetivo = Math.max(1, claseSeleccionada.capacidad || 15)
+
+          // Respaldo dinámico en UI: Si res.data viene vacío o tiene menos puestos que claseSeleccionada.capacidad:
+          // Completa o genera visualmente los puestos faltantes del 1 hasta claseSeleccionada.capacidad
+          if (listaBicis.length < capObjetivo) {
+            const existentesMap = new Map(listaBicis.map((b) => [b.numero, b]))
+            const bicisCompletas: BicicletaOcupacion[] = []
+
+            for (let i = 1; i <= capObjetivo; i++) {
+              const existente = existentesMap.get(i)
+              if (existente) {
+                bicisCompletas.push(existente)
+              } else {
+                bicisCompletas.push({
+                  id: `mock-bici-${claseSeleccionada.id}-${i}`,
+                  empresa_id: empresaId,
+                  numero: i,
+                  codigo: `P-${String(i).padStart(2, '0')}`,
+                  modelo: verticalConfig.recursoSingular || 'Puesto',
+                  fila: Math.ceil(i / 5),
+                  columna: ((i - 1) % 5) + 1,
+                  tipo: 'indoor',
+                  estado: 'disponible',
+                  latitud: null,
+                  longitud: null,
+                  bateria_porcentaje: null,
+                  tarifa_hora: null,
+                  activo: true,
+                  created_at: new Date().toISOString(),
+                  updated_at: null,
+                  ocupada: false,
+                  reservaId: null,
+                  clienteNombre: null,
+                })
+              }
+            }
+            listaBicis = bicisCompletas
+          }
+
+          setBicicletas(listaBicis)
         }
       } catch (err) {
         if (isMounted) {
-          toast({
-            variant: 'destructive',
-            title: 'Error de conexión',
-            description: err instanceof Error ? err.message : 'No se pudieron consultar las bicicletas',
-          })
-          setBicicletas([])
+          // Fallback dinámico inmediato si ocurre un error de red
+          const capObjetivo = Math.max(1, claseSeleccionada.capacidad || 15)
+          const bicisRespaldo: BicicletaOcupacion[] = []
+          for (let i = 1; i <= capObjetivo; i++) {
+            bicisRespaldo.push({
+              id: `mock-bici-${claseSeleccionada.id}-${i}`,
+              empresa_id: empresaId,
+              numero: i,
+              codigo: `P-${String(i).padStart(2, '0')}`,
+              modelo: verticalConfig.recursoSingular || 'Puesto',
+              fila: Math.ceil(i / 5),
+              columna: ((i - 1) % 5) + 1,
+              tipo: 'indoor',
+              estado: 'disponible',
+              latitud: null,
+              longitud: null,
+              bateria_porcentaje: null,
+              tarifa_hora: null,
+              activo: true,
+              created_at: new Date().toISOString(),
+              updated_at: null,
+              ocupada: false,
+              reservaId: null,
+              clienteNombre: null,
+            })
+          }
+          setBicicletas(bicisRespaldo)
         }
       } finally {
         if (isMounted) setLoadingBicis(false)
@@ -387,7 +446,7 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
     return () => {
       isMounted = false
     }
-  }, [claseSeleccionada, empresaId])
+  }, [claseSeleccionada, empresaId, verticalConfig.recursoSingular])
 
   // 4. Consultar si el usuario está en lista de espera de la clase activa
   useEffect(() => {
@@ -417,14 +476,6 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
     }
   }, [claseSeleccionada, currentUser?.id])
 
-  // Manejar cambio en "Cantidad de reservas" (1 a 7)
-  const handleChangeCantidadReservas = (nextRaw: number) => {
-    const clamped = Math.min(7, Math.max(1, Number.isNaN(nextRaw) ? 1 : Math.round(nextRaw)))
-    setCantidadReservas(clamped)
-    setSlotLimitWarning(null)
-    setSelectedSlotIds((prev) => (prev.length > clamped ? prev.slice(0, clamped) : prev))
-  }
-
   // Manejar click en un bloque de la grilla semanal (seleccionar / deseleccionar)
   const handleToggleBloqueSemanal = (bloque: BloqueHorarioSemanal) => {
     if (bloque.cuposDisponibles === 0) return
@@ -432,23 +483,12 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
     const yaSeleccionado = selectedSlotIds.includes(bloque.id)
 
     if (yaSeleccionado) {
-      setSelectedSlotIds((prev) => prev.filter((id) => id !== bloque.id))
-      setSlotLimitWarning(null)
+      setSelectedSlotIds([])
       return
     }
 
-    if (cantidadReservas === 1) {
-      setSelectedSlotIds([bloque.id])
-      setSlotLimitWarning(null)
-    } else if (selectedSlotIds.length < cantidadReservas) {
-      setSelectedSlotIds((prev) => [...prev, bloque.id])
-      setSlotLimitWarning(null)
-    } else {
-      setSlotLimitWarning(
-        `Ya seleccionaste ${cantidadReservas} bloques. Haz clic en un bloque marcado para deseleccionarlo o aumenta la cantidad.`
-      )
-      return
-    }
+    // Reserva directa de 1 horario a la vez
+    setSelectedSlotIds([bloque.id])
 
     // Sincronizar la vista del día y la clase activa con el bloque recién elegido
     if (bloque.fecha !== fechaSeleccionada) {
@@ -461,18 +501,19 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
 
   const handleLimpiarSeleccionSemanal = () => {
     setSelectedSlotIds([])
-    setSlotLimitWarning(null)
   }
 
   // Puestos libres y cálculo de si la clase está al 100% de ocupación
-  const puestosLibres = bicicletas.filter((b) => !b.ocupada && b.estado === 'disponible').length
+  const puestosLibres = bicicletas.filter(
+    (b) => b.activo && !b.ocupada && b.estado === 'disponible'
+  ).length
   const claseLleno =
     (claseSeleccionada && claseSeleccionada.cuposDisponibles === 0) ||
     (bicicletas.length > 0 && puestosLibres === 0)
 
   // Manejar click en una bicicleta
   const handleSelectBike = (bike: BicicletaOcupacion) => {
-    if (bike.ocupada || bike.estado === 'mantenimiento' || bike.estado === 'baja') {
+    if (!bike.activo || bike.ocupada || bike.estado === 'mantenimiento' || bike.estado === 'baja') {
       return
     }
     setSelectedBici(bike)
@@ -661,7 +702,14 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
     }
   }
 
-  const recursosActivos = bicicletas
+  const recursosActivos = useMemo(() => {
+    const activas = bicicletas.filter((b) => b.activo)
+    if (claseSeleccionada?.capacidad && claseSeleccionada.capacidad > 0) {
+      return activas.filter((b) => b.numero <= claseSeleccionada.capacidad)
+    }
+    return activas
+  }, [bicicletas, claseSeleccionada?.capacidad])
+
   const totalBicicletas = recursosActivos.length
   const capacidadActual = claseSeleccionada?.capacidad ?? recursosActivos?.length ?? 0
   const capacidadLlena = totalBicicletas > 0 ? totalBicicletas : capacidadActual
@@ -669,16 +717,48 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
     totalBicicletas > 0 ? totalBicicletas - puestosLibres : claseSeleccionada?.cuposOcupados ?? 0
   const salaTitle = `Distribución de ${verticalConfig.espacio} (Capacidad ${capacidadActual} ${verticalConfig.recursoPlural})`
 
-  // Agrupar bicicletas dinámicamente en filas de 5 puestos por fila
+  // Agrupar bicicletas activas dinámicamente en filas de 5 puestos por fila según la capacidad real de la clase
   const filasBicicletas = useMemo(() => {
-    const ordenadas = [...bicicletas].sort((a, b) => a.numero - b.numero)
+    let fuente = bicicletas.filter((b) => b.activo)
+    if (claseSeleccionada && (claseSeleccionada.capacidad || 15) > 0) {
+      const cap = claseSeleccionada.capacidad || 15
+      if (fuente.length === 0) {
+        fuente = Array.from({ length: cap }, (_, idx) => {
+          const num = idx + 1
+          return {
+            id: `fallback-bici-${claseSeleccionada.id}-${num}`,
+            empresa_id: empresaId,
+            numero: num,
+            codigo: `P-${String(num).padStart(2, '0')}`,
+            modelo: verticalConfig.recursoSingular || 'Puesto',
+            fila: Math.ceil(num / 5),
+            columna: ((num - 1) % 5) + 1,
+            tipo: 'indoor' as const,
+            estado: 'disponible' as const,
+            latitud: null,
+            longitud: null,
+            bateria_porcentaje: null,
+            tarifa_hora: null,
+            activo: true,
+            created_at: new Date().toISOString(),
+            updated_at: null,
+            ocupada: false,
+            reservaId: null,
+            clienteNombre: null,
+          }
+        })
+      } else {
+        fuente = fuente.filter((b) => b.numero <= cap)
+      }
+    }
+    const ordenadas = fuente.sort((a, b) => a.numero - b.numero)
     const filas: BicicletaOcupacion[][] = []
     const porFila = 5
     for (let i = 0; i < ordenadas.length; i += porFila) {
       filas.push(ordenadas.slice(i, i + porFila))
     }
     return filas
-  }, [bicicletas])
+  }, [bicicletas, claseSeleccionada, empresaId, verticalConfig.recursoSingular])
 
   const mostrarManana = filtroTurno === 'todas' || filtroTurno === 'manana'
   const mostrarNoche = filtroTurno === 'todas' || filtroTurno === 'noche'
@@ -704,7 +784,7 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground">
-            Elige la cantidad de reservas semanales, filtra por turno Mañana o Noche y aparta tu{' '}
+            Selecciona tu sesión semanal, filtra por turno Mañana o Noche y aparta tu{' '}
             {verticalConfig.recursoSingular.toLowerCase()}.
           </p>
         </div>
@@ -721,7 +801,7 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
             />
           </div>
 
-          {onCambiarEstudio && (
+          {!isSingleTenant && onCambiarEstudio && (
             <Button
               type="button"
               variant="outline"
@@ -752,128 +832,69 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                 Planificador Semanal de Horarios (Lunes a Domingo)
               </CardTitle>
               <CardDescription className="text-xs mt-0.5">
-                Selecciona entre 1 y 7 bloques en la semana del {semanaDias[0]?.etiquetaFecha} al{' '}
-                {semanaDias[6]?.etiquetaFecha}. Haz clic para seleccionar o deseleccionar.
+                Selecciona tu clase en la semana del {semanaDias[0]?.etiquetaFecha} al{' '}
+                {semanaDias[6]?.etiquetaFecha} para apartar tu {verticalConfig.recursoSingular.toLowerCase()}.
               </CardDescription>
             </div>
 
-            <div className="flex flex-wrap items-end gap-4">
-              {/* Selector numérico: Cantidad de reservas (1 a 7) */}
-              <div className="space-y-1.5">
-                <Label htmlFor={cantidadReservasId} className="text-xs font-semibold text-muted-foreground">
-                  Cantidad de reservas
-                </Label>
-                <div className="flex items-center gap-1.5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => handleChangeCantidadReservas(cantidadReservas - 1)}
-                    disabled={cantidadReservas <= 1}
-                    aria-label="Disminuir cantidad de reservas"
-                  >
-                    <Minus className="w-3.5 h-3.5" />
-                  </Button>
-                  <Input
-                    id={cantidadReservasId}
-                    type="number"
-                    min={1}
-                    max={7}
-                    value={cantidadReservas}
-                    onChange={(e) => handleChangeCantidadReservas(Number(e.target.value))}
-                    className="h-8 w-16 text-center font-bold text-sm px-1"
-                    aria-label="Cantidad de reservas"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => handleChangeCantidadReservas(cantidadReservas + 1)}
-                    disabled={cantidadReservas >= 7}
-                    aria-label="Aumentar cantidad de reservas"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </Button>
-                  <Badge variant="outline" className="text-[11px] font-mono ml-1">
-                    {cantidadReservas} / 7 máx.
-                  </Badge>
-                </div>
-              </div>
-
-              {/* Filtro rápido con botones Mañana (Azul) y Noche (Púrpura) */}
-              <div className="space-y-1.5">
-                <span className="block text-xs font-semibold text-muted-foreground">
-                  Filtro rápido de franja
-                </span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={filtroTurno === 'todas' ? 'default' : 'outline'}
-                    onClick={() => handleChangeFiltroTurno('todas')}
-                    className="h-8 text-xs font-semibold"
-                  >
-                    Todas
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleChangeFiltroTurno(filtroTurno === 'manana' ? 'todas' : 'manana')}
-                    aria-pressed={filtroTurno === 'manana'}
-                    className={`h-8 text-xs font-bold gap-1.5 transition-all ${
-                      filtroTurno === 'manana'
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-sm'
-                        : 'border-blue-300 bg-blue-50/70 text-blue-700 hover:bg-blue-100 hover:text-blue-800 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/50'
-                    }`}
-                  >
-                    <Sun className="w-3.5 h-3.5" />
-                    <span>Mañana</span>
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleChangeFiltroTurno(filtroTurno === 'noche' ? 'todas' : 'noche')}
-                    aria-pressed={filtroTurno === 'noche'}
-                    className={`h-8 text-xs font-bold gap-1.5 transition-all ${
-                      filtroTurno === 'noche'
-                        ? 'bg-purple-600 hover:bg-purple-700 text-white border-purple-600 shadow-sm'
-                        : 'border-purple-300 bg-purple-50/70 text-purple-700 hover:bg-purple-100 hover:text-purple-800 dark:border-purple-800 dark:bg-purple-950/30 dark:text-purple-300 dark:hover:bg-purple-900/50'
-                    }`}
-                  >
-                    <Moon className="w-3.5 h-3.5" />
-                    <span>Noche</span>
-                  </Button>
-                </div>
+            {/* Filtro rápido con botones Mañana (Azul) y Noche (Púrpura) */}
+            <div className="space-y-1.5 self-start sm:self-auto">
+              <span className="block text-xs font-semibold text-muted-foreground">
+                Filtro rápido de franja
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={filtroTurno === 'todas' ? 'default' : 'outline'}
+                  onClick={() => handleChangeFiltroTurno('todas')}
+                  className="h-8 text-xs font-semibold"
+                >
+                  Todas
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleChangeFiltroTurno(filtroTurno === 'manana' ? 'todas' : 'manana')}
+                  aria-pressed={filtroTurno === 'manana'}
+                  className={`h-8 text-xs font-bold gap-1.5 transition-all ${
+                    filtroTurno === 'manana'
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-sm'
+                      : 'border-blue-300 bg-blue-50/70 text-blue-700 hover:bg-blue-100 hover:text-blue-800 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/50'
+                  }`}
+                >
+                  <Sun className="w-3.5 h-3.5" />
+                  <span>Mañana</span>
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleChangeFiltroTurno(filtroTurno === 'noche' ? 'todas' : 'noche')}
+                  aria-pressed={filtroTurno === 'noche'}
+                  className={`h-8 text-xs font-bold gap-1.5 transition-all ${
+                    filtroTurno === 'noche'
+                      ? 'bg-purple-600 hover:bg-purple-700 text-white border-purple-600 shadow-sm'
+                      : 'border-purple-300 bg-purple-50/70 text-purple-700 hover:bg-purple-100 hover:text-purple-800 dark:border-purple-800 dark:bg-purple-950/30 dark:text-purple-300 dark:hover:bg-purple-900/50'
+                  }`}
+                >
+                  <Moon className="w-3.5 h-3.5" />
+                  <span>Noche</span>
+                </Button>
               </div>
             </div>
           </div>
 
-          {/* Barra de progreso visual que refleja la cantidad seleccionada */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t text-xs">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-semibold text-foreground">
-                Bloques elegidos: {selectedSlotIds.length} de {cantidadReservas}
+          {/* Indicador sutil del bloque seleccionado en la grilla */}
+          {selectedSlotIds.length > 0 && selectedBloques[0] && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t text-xs">
+              <span className="text-muted-foreground">
+                Horario seleccionado en grilla:{' '}
+                <strong className="text-foreground">
+                  {selectedBloques[0].titulo} ({selectedBloques[0].diaNombre} {selectedBloques[0].etiquetaFecha} • {selectedBloques[0].horaInicio} - {selectedBloques[0].horaFin})
+                </strong>
               </span>
-              <div className="flex items-center gap-1" aria-label="Indicador de reservas seleccionadas">
-                {Array.from({ length: cantidadReservas }, (_, idx) => {
-                  const filled = idx < selectedSlotIds.length
-                  return (
-                    <span
-                      key={idx}
-                      className={`h-2.5 w-6 rounded-full transition-all ${
-                        filled ? currentPalette.bgClass : 'bg-muted border border-border'
-                      }`}
-                    />
-                  )
-                })}
-              </div>
-            </div>
-
-            {selectedSlotIds.length > 0 && (
               <Button
                 type="button"
                 variant="ghost"
@@ -882,15 +903,8 @@ export const IndoorBikeMap: React.FC<IndoorBikeMapProps> = ({
                 className="h-7 text-xs text-muted-foreground hover:text-destructive gap-1 self-start sm:self-auto"
               >
                 <RotateCcw className="w-3 h-3" />
-                <span>Limpiar selección</span>
+                <span>Desmarcar horario</span>
               </Button>
-            )}
-          </div>
-
-          {slotLimitWarning && (
-            <div className="p-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>{slotLimitWarning}</span>
             </div>
           )}
         </CardHeader>

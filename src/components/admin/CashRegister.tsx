@@ -192,7 +192,7 @@ export const CashRegister: React.FC<CashRegisterProps> = ({
     (resumenCaja.desglosePorMetodo?.['tarjeta']?.ingresos || 0)
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-6 w-full">
       {/* Encabezado y Selector de Fecha */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4">
         <div>

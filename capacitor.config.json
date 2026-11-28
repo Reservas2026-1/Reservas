@@ -1,5 +1,11 @@
 {
-    "appId": "com.reservas.indoorcycling",
-    "appName": "Reservas Studio",
-    "webDir": "dist"
+  "appId": "com.reserly.app",
+  "appName": "Reserly",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "https"
+  }
 }
